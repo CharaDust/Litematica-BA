@@ -39,6 +39,7 @@
   "Save": {
     "Basic": "11111111",
     "First_open": "1",
+    "Language": "zh",
     "ui": {
       "Font": "Arial",
       "FontSize": 10,

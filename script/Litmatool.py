@@ -13,10 +13,10 @@ def grs(relative_path):
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)
 
-json_data = json.load(open(grs(os.path.join('lang', 'zh_cn.json')), 'r', encoding='utf-8'))
+json_data = json.load(open(grs(os.path.join('lang', 'setting.json')), 'r', encoding='utf-8'))
 
-def convert_units(number):
-    units = {'箱': 54 * 27 * 64, '盒': 27 * 64, '组': 64, '个': 1}
+def convert_units(number,lang):
+    units = {'箱': 54 * 27 * 64, '盒': 27 * 64, '组': 64, '个': 1} if lang == "zh" else {'LargeChest': 54 * 27 * 64, 'Box': 27 * 64, 'S': 64, 'U': 1}
     result = ""
     for unit, value in units.items():
         if number >= value:
