@@ -9,3 +9,4 @@ sdist/
 *.spec
 log.txt
 error.log
+/.venv

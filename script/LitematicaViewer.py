@@ -10,7 +10,6 @@ from litemapy import Schematic, BlockState
 from PIL import Image, ImageTk, ImageEnhance
 from easygui import boolbox,choicebox,msgbox,enterbox
 from tqdm import tqdm
-from xonsh.completers.tools import justify
 
 sys.path.extend(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -242,7 +241,7 @@ class LitStepChecker:
             row=0, column=8, padx=2, pady=5)
         self.label_y = tk.Label(self.frame, text="Y=0")
         self.label_y.grid(row=0, column=9, padx=2, pady=5)
-        self.label_rend = tk.Label(self.frame, text=f"{LANG["ui.ls.label6"]}={self.rendblock}")
+        self.label_rend = tk.Label(self.frame, text=f"{LANG['ui.ls.label6']}={self.rendblock}")
         self.label_rend.grid(row=0, column=10, padx=2, pady=5)
         self.label_prop = tk.Label(self.LS, text=LANG["ui.ls.label7"])
         self.label_prop.pack(fill=tk.Y, side=tk.TOP)
