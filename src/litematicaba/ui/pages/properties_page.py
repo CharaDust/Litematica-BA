@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from litematicaba.core.snbt_properties import SnbtProperties, load_snbt_properties, save_snbt_properties
+from litematicaba.ui.theme import current_theme_id
 
 
 class _PreviewCanvas(QFrame):
@@ -69,6 +71,7 @@ class PropertiesPage(QWidget):
         self._dirty = False
         self._current_data = SnbtProperties()
         self._preview_image = QImage()
+        self._full_file_hint_text = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -80,6 +83,7 @@ class PropertiesPage(QWidget):
         root.addWidget(scroll)
 
         body = QWidget()
+        body.setMinimumWidth(0)
         scroll.setWidget(body)
         body_l = QVBoxLayout(body)
         body_l.setContentsMargins(16, 16, 16, 16)
@@ -96,6 +100,16 @@ class PropertiesPage(QWidget):
         self._wire_change_tracking()
         self._apply_model_to_ui(self._current_data)
         self._loading = False
+        self._apply_line_edit_horizontal_shrink()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._update_file_hint_elide()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._apply_snbt_column_min_width()
+        QTimer.singleShot(0, self._update_file_hint_elide)
 
     def _build_file_select_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -123,8 +137,16 @@ class PropertiesPage(QWidget):
     def _build_meta_and_preview_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(12)
-        row.addWidget(self._build_snbt_box(), 2)
-        row.addWidget(self._build_preview_box(), 1)
+        self._snbt_column = QWidget()
+        self._snbt_column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._snbt_column.setMinimumWidth(0)
+        snbt_outer = QVBoxLayout(self._snbt_column)
+        snbt_outer.setContentsMargins(0, 0, 0, 0)
+        snbt_outer.addWidget(self._build_snbt_box())
+        preview_box = self._build_preview_box()
+        preview_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        row.addWidget(self._snbt_column, 2)
+        row.addWidget(preview_box, 1)
         return row
 
     def _build_snbt_box(self) -> QGroupBox:
@@ -163,6 +185,7 @@ class PropertiesPage(QWidget):
         form.addRow("修改时间：", self._modified_time_readonly)
         form.addRow("尺寸：", self._build_size_row_widget())
         form.addRow("体积：", self._build_volume_row_widget())
+        form.setHorizontalSpacing(8)
         return box
 
     def _build_size_row_widget(self) -> QWidget:
@@ -226,6 +249,7 @@ class PropertiesPage(QWidget):
         self._mc_data_ver_readonly.setReadOnly(True)
         form.addRow("投影文件版本：", self._litematica_ver_readonly)
         form.addRow("Minecraft 数据版本：", self._mc_data_ver_readonly)
+        form.setHorizontalSpacing(8)
         return box
 
     def _build_regions_box(self) -> QGroupBox:
@@ -371,14 +395,12 @@ class PropertiesPage(QWidget):
             QMessageBox.critical(self, "打开失败", f"读取 SNBT 失败：\n{exc}")
             return
         self._current_data = data
+        self._dirty = False
         self._loading = True
         self._apply_model_to_ui(data)
         self._loading = False
-        self._dirty = False
-        self._sync_title_hint()
 
     def _apply_model_to_ui(self, data: SnbtProperties) -> None:
-        self._active_file_hint.setText(str(data.file_path) if data.file_path else "当前未激活文件")
         self._file_name_edit.setText(data.file_name)
         self._author_edit.setText(data.author)
         self._description_edit.setText(data.description)
@@ -393,6 +415,34 @@ class PropertiesPage(QWidget):
         self._litematica_ver_readonly.setText(str(data.litematic_version))
         self._mc_data_ver_readonly.setText(str(data.minecraft_data_version))
         self._set_preview_from_argb_list(data.preview_image_data)
+        self._sync_title_hint()
+
+    def _apply_line_edit_horizontal_shrink(self) -> None:
+        for w in self.findChildren(QLineEdit):
+            w.setMinimumWidth(0)
+            w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def _apply_snbt_column_min_width(self) -> None:
+        app = QApplication.instance()
+        tid = current_theme_id(app) if app is not None else "QTDefault"
+        if tid == "Minecraft":
+            self._snbt_column.setMinimumWidth(400)
+        else:
+            self._snbt_column.setMinimumWidth(0)
+
+    def _update_file_hint_elide(self) -> None:
+        text = self._full_file_hint_text
+        w = self._active_file_hint.width()
+        if w < 48:
+            row = self._active_file_hint.parentWidget()
+            if row is not None:
+                w = max(48, row.width() - 280)
+        elided = self._active_file_hint.fontMetrics().elidedText(
+            text,
+            Qt.TextElideMode.ElideMiddle,
+            max(48, w - 8),
+        )
+        self._active_file_hint.setText(elided)
 
     def _collect_ui_to_model(self) -> SnbtProperties:
         model = SnbtProperties(
@@ -463,7 +513,9 @@ class PropertiesPage(QWidget):
 
     def _sync_title_hint(self) -> None:
         base = str(self._current_data.file_path) if self._current_data.file_path else "当前未激活文件"
-        self._active_file_hint.setText(f"{base}{' *' if self._dirty else ''}")
+        self._full_file_hint_text = f"{base}{' *' if self._dirty else ''}"
+        self._active_file_hint.setToolTip(self._full_file_hint_text)
+        self._update_file_hint_elide()
 
     @staticmethod
     def _format_timestamp(ts: int) -> str:
