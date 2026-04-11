@@ -11,25 +11,84 @@
 </head>
 <body>
   <canvas id="c"></canvas>
-  <script src="https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/gl-matrix-min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/deepslate@0.25.1/dist/deepslate.umd.cjs"></script>
+  <!-- 设计 §2.6.3.8：脚本与库均为应用内本地文件；勿依赖远程脚本（避免 MIME / CSP 问题） -->
+  <script>
+(function () {
+  window.__lbaVoxelQueue = [];
+  window.__lbaViewPreset = 0;
+  window.lbaLoadVoxelsB64 = function (b64) {
+    window.__lbaVoxelQueue.push(b64);
+    if (typeof window.__lbaInternalApplyVoxels === "function") {
+      while (window.__lbaVoxelQueue.length) {
+        window.__lbaInternalApplyVoxels(window.__lbaVoxelQueue.shift());
+      }
+    }
+  };
+  window.lbaSetViewPreset = function (n) {
+    window.__lbaViewPreset = Math.max(0, Math.min(8, n | 0));
+  };
+})();
+  </script>
+  <script src="vendor/gl-matrix-min.js"></script>
+  <script src="vendor/deepslate.umd.js"></script>
   <script>
 (function () {
   const canvas = document.getElementById("c");
   const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false, antialias: true });
   if (!gl) {
     document.body.textContent = "WebGL 不可用";
+    window.__lbaInternalApplyVoxels = function () {};
     return;
   }
   const DS = window.deepslate;
   if (!DS || !DS.VoxelRenderer) {
-    document.body.textContent = "Deepslate 未加载（请检查网络或 CDN）";
+    document.body.textContent = "Deepslate 未加载（请检查 vendor/deepslate.umd.js）";
+    window.__lbaInternalApplyVoxels = function () {};
     return;
   }
   const { mat4 } = glMatrix;
   const voxelRenderer = new DS.VoxelRenderer(gl);
-  let angle = 0;
   let camDist = 64;
+
+  function viewMatrixForPreset(p, d) {
+    const dh = d * 0.45;
+    const v = mat4.create();
+    const eye = [0, 0, 0];
+    const up = [0, 1, 0];
+    switch (p) {
+      case 0:
+        mat4.lookAt(v, [0, d, 0], [0, 0, 0], [0, 0, -1]);
+        return v;
+      case 1:
+        mat4.lookAt(v, [0, dh, -d], [0, 0, 0], up);
+        return v;
+      case 2:
+        mat4.lookAt(v, [0, dh, d], [0, 0, 0], up);
+        return v;
+      case 3:
+        mat4.lookAt(v, [-d, dh, 0], [0, 0, 0], up);
+        return v;
+      case 4:
+        mat4.lookAt(v, [d, dh, 0], [0, 0, 0], up);
+        return v;
+      case 5:
+        eye[0] = d * 0.82; eye[1] = d * 0.55; eye[2] = -d * 0.82;
+        mat4.lookAt(v, eye, [0, 0, 0], up);
+        return v;
+      case 6:
+        eye[0] = d * 0.82; eye[1] = d * 0.55; eye[2] = d * 0.82;
+        mat4.lookAt(v, eye, [0, 0, 0], up);
+        return v;
+      case 7:
+        eye[0] = -d * 0.82; eye[1] = d * 0.55; eye[2] = d * 0.82;
+        mat4.lookAt(v, eye, [0, 0, 0], up);
+        return v;
+      default:
+        eye[0] = -d * 0.82; eye[1] = d * 0.55; eye[2] = -d * 0.82;
+        mat4.lookAt(v, eye, [0, 0, 0], up);
+        return v;
+    }
+  }
 
   function resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -45,21 +104,14 @@
   window.addEventListener("resize", resize);
 
   function tick() {
-    angle += 0.007;
     resize();
-    const view = mat4.create();
-    const d = camDist;
-    mat4.lookAt(
-      view,
-      [Math.cos(angle) * d, d * 0.52, Math.sin(angle) * d],
-      [0, 0, 0],
-      [0, 1, 0],
-    );
+    const preset = window.__lbaViewPreset | 0;
+    const view = viewMatrixForPreset(preset, camDist);
     voxelRenderer.draw(view);
     requestAnimationFrame(tick);
   }
 
-  window.lbaLoadVoxelsB64 = function (b64) {
+  window.__lbaInternalApplyVoxels = function (b64) {
     try {
       const bin = atob(b64);
       const bytes = new Uint8Array(bin.length);
@@ -84,6 +136,10 @@
       voxelRenderer.setVoxels([]);
     }
   };
+
+  while (window.__lbaVoxelQueue.length) {
+    window.__lbaInternalApplyVoxels(window.__lbaVoxelQueue.shift());
+  }
 
   resize();
   requestAnimationFrame(tick);

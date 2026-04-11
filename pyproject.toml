@@ -21,4 +21,4 @@ litematicaba = "litematicaba.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-litematicaba = ["resources/web/*"]
+litematicaba = ["resources/web/*", "resources/web/vendor/*"]
