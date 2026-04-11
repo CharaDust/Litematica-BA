@@ -196,6 +196,8 @@ EnclosingSize: {
    - “从client.jar资产文件提取2D图片”（AssetUse）：读取选定jar文件内`asset/minecraft`内的数据，直接提取出来使用
    - “使用已有的图片”（Local）：选定包含图片的文件夹，直接使用里面的图片
  - 语言文件
-   - “从Minecraft Wiki获取”：暂时未想到解决方案
+   - “从Minecraft Wiki获取”：暂时未想到解决方案，放个占位
    - “从外部文件获取”：读取选定json文件，并提取方块和物品译名，如果文件名不是语言代码，则询问用户该文件属于哪个语言
-     - 默认从`https://github.com/InventivetalentDev/minecraft-assets/blob/$版本$/assets/minecraft/lang/$语言$.json`
+     - 默认从`https://github.com/InventivetalentDev/minecraft-assets/blob/$版本$/assets/minecraft/lang/$语言$.json`获取
+       - $版本$从设置中读取，目前是26.1
+       - $语言$根据设置中的显示语言而定，默认为系统语言
