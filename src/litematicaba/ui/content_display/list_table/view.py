@@ -73,6 +73,25 @@ def _is_metro_list_theme(theme_id: str) -> bool:
     return theme_id in ("Metro8", "Metro10")
 
 
+# 供属性页等「纯文本数据表」与内容物列表共用同一套 Metro 扁平表 QSS / 行高约定
+METRO_LIST_TABLE_CHROME_QSS = _METRO_TABLE_QSS
+METRO_LIST_SAMPLE_ROW_HEIGHT = _METRO_ROW_H
+
+
+def is_metro_list_table_theme(theme_id: str) -> bool:
+    """是否与 ``ContentListTableWidget`` 使用相同的 Metro 列表扁平绘制（Metro8 / Metro10）。"""
+    return _is_metro_list_theme(normalize_theme_id(theme_id))
+
+
+def uses_content_list_sample_row_height(theme_id: str) -> bool:
+    """与 ``ContentListTableWidget._apply_list_metrics`` 中 ``_use_metro_sample`` 一致。
+
+    仅 ``QTDefault`` 使用紧凑行高（``resizeRowToContents``）；Minecraft、Glass、Fluent 等其它主题
+    与 UI 测试页内容列表相同，采用 ``METRO_LIST_SAMPLE_ROW_HEIGHT``（60px）样本行高。
+    """
+    return normalize_theme_id(theme_id) != "QTDefault"
+
+
 def _qt_list_thumb_px() -> int:
     app = QApplication.instance()
     if app is None:

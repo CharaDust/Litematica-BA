@@ -59,7 +59,8 @@ class MainWindow(QWidget):
         self._stack = QStackedWidget()
         self._stack.addWidget(HomePage())
         self._stack.addWidget(LibraryPage())
-        self._stack.addWidget(PropertiesPage())
+        self._properties_page = PropertiesPage()
+        self._stack.addWidget(self._properties_page)
         self._stack.addWidget(StatisticsPage())
         self._stack.addWidget(FlakePage())
         self._stack.addWidget(RenderPage())
@@ -109,7 +110,7 @@ class MainWindow(QWidget):
 
         self._btn_home.clicked.connect(lambda: self._stack.setCurrentIndex(PAGE_HOME))
         self._btn_library.clicked.connect(lambda: self._stack.setCurrentIndex(PAGE_LIBRARY))
-        self._btn_properties.clicked.connect(lambda: self._stack.setCurrentIndex(PAGE_PROPERTIES))
+        self._btn_properties.clicked.connect(self._on_nav_properties)
         self._btn_statistics.clicked.connect(lambda: self._stack.setCurrentIndex(PAGE_STATISTICS))
         self._btn_flake.clicked.connect(lambda: self._stack.setCurrentIndex(PAGE_FLAKE))
         self._btn_render.clicked.connect(lambda: self._stack.setCurrentIndex(PAGE_RENDER))
@@ -243,12 +244,17 @@ class MainWindow(QWidget):
                 other.setChecked(False)
         self._btn_group.setExclusive(True)
 
+    def _on_nav_properties(self) -> None:
+        self._properties_page.apply_regions_table_theme()
+        self._stack.setCurrentIndex(PAGE_PROPERTIES)
+
     def _on_settings_changed(self, s: AppSettings) -> None:
         self._settings = s
         apply_theme(QApplication.instance(), s.theme_id)
         self._btn_ui_test.setVisible(s.show_ui_test_nav)
         self._widget_inspector.set_enabled(s.show_widget_inspector)
         self._ui_test_page.apply_settings(s)
+        self._properties_page.apply_regions_table_theme()
         self._apply_sidebar_geometry()
         if not s.show_ui_test_nav and self._stack.currentIndex() == PAGE_UI_TEST:
             self._stack.setCurrentIndex(PAGE_HOME)
