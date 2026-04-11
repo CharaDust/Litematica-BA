@@ -65,7 +65,7 @@ class MainWindow(QWidget):
         self._statistics_page = StatisticsPage(self._properties_page)
         self._stack.addWidget(self._statistics_page)
         self._stack.addWidget(FlakePage(self._properties_page))
-        self._render_page = RenderPage(self._properties_page)
+        self._render_page = RenderPage(self._properties_page, app_settings=self._settings)
         self._stack.addWidget(self._render_page)
         self._stack.addWidget(ReplacePage())
         self._ui_test_page = UiTestPage(
@@ -263,6 +263,7 @@ class MainWindow(QWidget):
         self._perf_test.set_enabled(s.perf_test_overlay)
         self._ui_test_page.apply_settings(s)
         self._properties_page.apply_regions_table_theme()
+        self._render_page.apply_deepslate_settings(s)
         self._apply_sidebar_geometry()
         if not s.show_ui_test_nav and self._stack.currentIndex() == PAGE_UI_TEST:
             self._stack.setCurrentIndex(PAGE_HOME)

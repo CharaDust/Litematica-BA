@@ -37,6 +37,8 @@ class AppSettings:
     perf_test_overlay: bool = False
     # Deepslate / WebView 渲染包：默认不在启动时联网检查；见 design §2.0.4、§2.6.3.9
     deepslate_check_updates_on_startup: bool = False
+    # 3D 轨道：纵向拖拽符号；勾选后适合与鼠标默认相反的触摸屏习惯
+    deepslate_invert_y: bool = False
 
     def normalized(self) -> AppSettings:
         t = self.theme_id if self.theme_id in VALID_THEMES else DEFAULT_THEME
@@ -49,6 +51,7 @@ class AppSettings:
             show_widget_inspector=bool(self.show_widget_inspector),
             perf_test_overlay=bool(self.perf_test_overlay),
             deepslate_check_updates_on_startup=bool(self.deepslate_check_updates_on_startup),
+            deepslate_invert_y=bool(self.deepslate_invert_y),
         )
 
 
@@ -73,6 +76,7 @@ def load_settings() -> AppSettings:
         show_widget_inspector=bool(raw.get("show_widget_inspector", False)),
         perf_test_overlay=bool(raw.get("perf_test_overlay", False)),
         deepslate_check_updates_on_startup=bool(raw.get("deepslate_check_updates_on_startup", False)),
+        deepslate_invert_y=bool(raw.get("deepslate_invert_y", False)),
     ).normalized()
 
 

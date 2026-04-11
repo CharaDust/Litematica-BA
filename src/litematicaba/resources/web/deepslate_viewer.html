@@ -28,6 +28,10 @@
     window.__lbaViewPreset = Math.max(0, Math.min(8, n | 0));
     window.__lbaSyncViewFromPreset = true;
   };
+  window.__lbaInvertY = false;
+  window.lbaSetInvertY = function (v) {
+    window.__lbaInvertY = !!v;
+  };
 })();
   </script>
   <script src="vendor/gl-matrix-min.js"></script>
@@ -161,9 +165,11 @@
     lastPx = e.clientX;
     lastPy = e.clientY;
 
+    const ySign = window.__lbaInvertY ? -1 : 1;
     if (dragMode === 1) {
       yaw -= dx * ORBIT_SENS;
-      pitch -= dy * ORBIT_SENS;
+      // 未勾选「反转 Y」：鼠标向下拖 → 视角向下（常见 FPS/建模习惯）；勾选后与触摸屏「拖动内容」习惯一致
+      pitch += dy * ORBIT_SENS * ySign;
       if (pitch < PITCH_MIN) pitch = PITCH_MIN;
       if (pitch > PITCH_MAX) pitch = PITCH_MAX;
     } else if (dragMode === 2) {
@@ -177,7 +183,7 @@
       vec3.normalize(upv, upv);
       const k = panScale();
       vec3.scaleAndAdd(pan, pan, right, -dx * k);
-      vec3.scaleAndAdd(pan, pan, upv, dy * k);
+      vec3.scaleAndAdd(pan, pan, upv, dy * k * ySign);
     }
   });
 

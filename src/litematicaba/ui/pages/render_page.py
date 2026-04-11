@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from litematicaba.core.litematic_voxel_export import build_region_voxels_payload
+from litematicaba.core.settings import AppSettings
 from litematicaba.ui.material_list_dialog import MaterialListDialog
 from litematicaba.ui.pages.properties_page import PropertiesPage
 
@@ -100,9 +101,18 @@ class _VoxelPayloadThread(QThread):
 class RenderPage(QWidget):
     """Deepslate ``VoxelRenderer`` 与九向相机预设（FR-R.6）。"""
 
-    def __init__(self, properties_page: PropertiesPage, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        properties_page: PropertiesPage,
+        *,
+        app_settings: AppSettings | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._props = properties_page
+        self._deepslate_invert_y: bool = (
+            bool(app_settings.deepslate_invert_y) if app_settings is not None else False
+        )
         self._thread: _VoxelPayloadThread | None = None
         self._load_superseded: bool = False
         self._pending_b64: str | None = None
@@ -204,6 +214,17 @@ class RenderPage(QWidget):
 
         self._props.active_file_changed.connect(self._on_active_file_changed)
 
+    def apply_deepslate_settings(self, s: AppSettings) -> None:
+        """由主窗口在选项变更时调用，同步 WebView 内纵向拖拽符号。"""
+        self._deepslate_invert_y = bool(s.deepslate_invert_y)
+        self._push_invert_y_to_webview()
+
+    def _push_invert_y_to_webview(self) -> None:
+        if self._view is None or not self._viewer_ready:
+            return
+        lit = "true" if self._deepslate_invert_y else "false"
+        self._view.page().runJavaScript(f"window.lbaSetInvertY({lit});")
+
     def _current_view_preset(self) -> int:
         btn = self._view_group.checkedButton()
         if btn is None:
@@ -239,6 +260,7 @@ class RenderPage(QWidget):
         if ok:
             self._try_inject_pending()
             self._sync_view_preset_js()
+            self._push_invert_y_to_webview()
         elif self._view is not None:
             self._status.setText("本地 Web 视图加载失败（请确认 resources/web 下 HTML 与 vendor 脚本齐全）。")
 

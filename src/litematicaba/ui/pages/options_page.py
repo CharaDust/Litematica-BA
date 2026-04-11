@@ -80,6 +80,10 @@ class OptionsPage(QWidget):
         hint_render.setWordWrap(True)
         hint_render.setStyleSheet("color: palette(mid);")
         form_render.addRow(hint_render)
+        self._deepslate_invert_y = QCheckBox(
+            "3D 视图反转纵向拖拽（触摸屏与鼠标纵向习惯相反时勾选；未勾选为常见鼠标习惯）"
+        )
+        form_render.addRow(self._deepslate_invert_y)
         self._deepslate_check_startup = QCheckBox("启动时检查渲染组件更新（需更新源可用后生效，默认关闭）")
         form_render.addRow(self._deepslate_check_startup)
         self._btn_deepslate_update = QPushButton("立即检查渲染组件更新…")
@@ -98,6 +102,7 @@ class OptionsPage(QWidget):
         self._show_tile_grid.toggled.connect(self._persist)
         self._tile_auto_place_preferred_cols.valueChanged.connect(self._persist)
         self._tile_view_right_padding_px.valueChanged.connect(self._persist)
+        self._deepslate_invert_y.toggled.connect(self._persist)
         self._deepslate_check_startup.toggled.connect(self._persist)
 
         self._loading = False
@@ -112,6 +117,7 @@ class OptionsPage(QWidget):
         self._show_tile_grid.setChecked(s.show_tile_grid)
         self._tile_auto_place_preferred_cols.setValue(s.tile_auto_place_preferred_cols)
         self._tile_view_right_padding_px.setValue(s.tile_view_right_padding_px)
+        self._deepslate_invert_y.setChecked(s.deepslate_invert_y)
         self._deepslate_check_startup.setChecked(s.deepslate_check_updates_on_startup)
         self._loading = False
 
@@ -125,6 +131,7 @@ class OptionsPage(QWidget):
             tile_view_right_padding_px=self._tile_view_right_padding_px.value(),
             perf_test_overlay=self._perf_test_overlay.isChecked(),
             deepslate_check_updates_on_startup=self._deepslate_check_startup.isChecked(),
+            deepslate_invert_y=self._deepslate_invert_y.isChecked(),
         ).normalized()
 
     def _on_deepslate_update_clicked(self) -> None:
