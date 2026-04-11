@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -100,6 +100,8 @@ class _PreviewCanvas(QFrame):
 class PropertiesPage(QWidget):
     """主属性页：中间内容为可滚动区域，底部操作按钮条固定在页面下沿（不参与滚动）。"""
 
+    active_file_changed = Signal(str)
+
     @staticmethod
     def _align_numeric_line_edit(w: QLineEdit) -> None:
         """尺寸、体积、版本号等纯数字只读框：文本右对齐便于纵列对比位数。"""
@@ -156,6 +158,10 @@ class PropertiesPage(QWidget):
         self._loading = False
         # 允许 QLineEdit 在窄布局下收缩，避免把整行撑得过宽
         self._apply_line_edit_horizontal_shrink()
+
+    def active_file_path(self) -> Path | None:
+        """当前激活的投影文件路径；无文件时为 ``None``（供统计等模块读取）。"""
+        return self._current_data.file_path
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -613,6 +619,8 @@ class PropertiesPage(QWidget):
         self._loading = True
         self._apply_model_to_ui(data)
         self._loading = False
+        if data.file_path is not None:
+            self.active_file_changed.emit(str(data.file_path.resolve()))
 
     def _apply_model_to_ui(self, data: SnbtProperties) -> None:
         """单向：数据模型 → 控件文本与预览；不修改 ``_dirty``（由调用方控制）。"""

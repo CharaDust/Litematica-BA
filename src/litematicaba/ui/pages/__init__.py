@@ -7,9 +7,8 @@ from litematicaba.ui.pages.placeholders import (
     LibraryPage,
     RenderPage,
     ReplacePage,
-    StatisticsPage,
 )
-from litematicaba.ui.pages.settings_page import SettingsPage
+from litematicaba.ui.pages.statistics_page import StatisticsPage
 from litematicaba.ui.pages.ui_test_page import UiTestPage
 
 __all__ = [
@@ -23,5 +22,4 @@ __all__ = [
     "OptionsPage",
     "PickPage",
     "UiTestPage",
-    "SettingsPage",
 ]

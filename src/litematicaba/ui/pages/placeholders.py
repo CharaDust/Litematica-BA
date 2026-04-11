@@ -194,13 +194,6 @@ class PropertiesPage(QWidget):
         root.addWidget(_empty_page("属性（Properties）", "占位：SNBT 元数据读写将在后续实现。"))
 
 
-class StatisticsPage(QWidget):
-    def __init__(self) -> None:
-        super().__init__()
-        root = QVBoxLayout(self)
-        root.addWidget(_empty_page("统计（Statistics）", "占位：统计分析与图表将在后续实现。"))
-
-
 class FlakePage(QWidget):
     def __init__(self) -> None:
         super().__init__()
