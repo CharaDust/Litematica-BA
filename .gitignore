@@ -10,3 +10,5 @@ sdist/
 log.txt
 error.log
 /.venv
+/data
+/tmp
