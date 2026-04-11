@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,42 +28,22 @@ DEFAULT_THEME = "QTDefault"
 
 @dataclass
 class AppSettings:
-    display_name: str = "User"
-    slogan_visible: bool = True
-    slogan_text: str = "今天也随便看看吧"
-    slogan_pt: int = 24
     theme_id: str = DEFAULT_THEME
     show_ui_test_nav: bool = True
     show_tile_grid: bool = False
     tile_auto_place_preferred_cols: int = 12
     tile_view_right_padding_px: int = 64
     show_widget_inspector: bool = False
-    pick_common_groups: list[dict[str, str]] = field(default_factory=list)
 
     def normalized(self) -> AppSettings:
         t = self.theme_id if self.theme_id in VALID_THEMES else DEFAULT_THEME
-        pt = max(18, min(36, int(self.slogan_pt)))
-        groups: list[dict[str, str]] = []
-        for item in self.pick_common_groups:
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name", "")).strip()
-            path = str(item.get("path", "")).strip()
-            if not name or not path:
-                continue
-            groups.append({"name": name, "path": path})
         return AppSettings(
-            display_name=self.display_name.strip() or "User",
-            slogan_visible=self.slogan_visible,
-            slogan_text=self.slogan_text or "今天也随便看看吧",
-            slogan_pt=pt,
             theme_id=t,
             show_ui_test_nav=self.show_ui_test_nav,
             show_tile_grid=bool(self.show_tile_grid),
             tile_auto_place_preferred_cols=max(1, min(64, int(self.tile_auto_place_preferred_cols))),
             tile_view_right_padding_px=max(0, min(300, int(self.tile_view_right_padding_px))),
             show_widget_inspector=bool(self.show_widget_inspector),
-            pick_common_groups=groups,
         )
 
 
@@ -80,17 +60,12 @@ def load_settings() -> AppSettings:
     except (OSError, json.JSONDecodeError):
         return AppSettings()
     return AppSettings(
-        display_name=str(raw.get("display_name", "User")),
-        slogan_visible=bool(raw.get("slogan_visible", True)),
-        slogan_text=str(raw.get("slogan_text", "今天也随便看看吧")),
-        slogan_pt=int(raw.get("slogan_pt", 24)),
         theme_id=str(raw.get("theme_id", DEFAULT_THEME)),
         show_ui_test_nav=bool(raw.get("show_ui_test_nav", True)),
         show_tile_grid=bool(raw.get("show_tile_grid", False)),
         tile_auto_place_preferred_cols=int(raw.get("tile_auto_place_preferred_cols", 9)),
         tile_view_right_padding_px=int(raw.get("tile_view_right_padding_px", 64)),
         show_widget_inspector=bool(raw.get("show_widget_inspector", False)),
-        pick_common_groups=list(raw.get("pick_common_groups", [])),
     ).normalized()
 
 

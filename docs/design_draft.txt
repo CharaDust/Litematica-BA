@@ -172,4 +172,30 @@ EnclosingSize: {
        - 添加设置项，决定这些数字是提前算出还是即时演算
 
 9.多语言支持（次优先）
-根据json语言文件更改显示语言
+根据json语言文件更改语言
+ - 界面语言根据data/lang/中的语言文件显示
+ - 游戏标准译名根据data/minecraft/minecraft版本/assets/lang/中的语言文件显示
+
+10.资源管理
+管理软件运行所需的资源文件的使用方式，每一个项目提供“加载方式”下拉框，“来源”输入框，“浏览...”按钮（用于快速填写“来源”输入框），“下载/加载”按钮，“删除”按钮
+ - 数据值表
+   - “从Minecraft Wiki获取表格”：`https://minecraft.wiki/w/Java_Edition_data_values/Blocks`
+ - 方块图标（不同方案保存在不同位置`data/minecraft/blockIcon/加载方式`）
+   - “从Minecraft Wiki下载png”（Wiki）：暂时未想到解决方案
+   - “从client.jar资产文件构建”（AssetBuild）：读取选定jar文件内`asset/minecraft`内的数据后，根据对应数据值，按照Minecraft Wiki标准视图生成方法渲染图标（非优先）
+     - 渲染时视角为45°和60°，且与西北对齐。
+     - 图片尺寸为300×300px。无论实际方块的大小如何，都不应对空白部分进行裁剪。
+     - 光源的精确值与游戏同步，通过按比例减少三个面的颜色值实现（平行边使用相同的数值）。顶侧：98%，左侧：80%，右侧：60.8%。
+     - 禁用抗锯齿，它不适用于游戏中的单个对象。
+     - 不要进行后期处理；尤其不要对其进行缩放，因为缩放会使图片应用抗锯齿。如果渲染包含错误，则应该重新进行渲染。
+   - “从client.jar资产文件提取2D图片”（AssetUse）：读取选定jar文件内`asset/minecraft`内的数据，直接提取出来使用
+   - “使用已有资产库构建”：构建方法见上，但是读取的是asset文件夹，文件夹可以是网络来源，
+   - “使用已有的图片”（Local）：选定包含图片的文件夹，直接使用里面的图片
+ - 物品图标 （不同方案保存在不同位置`data/minecraft/itemIcon/加载方式`）
+   - “从Minecraft Wiki下载png”（Wiki）：暂时未想到解决方案
+   - “从client.jar资产文件提取2D图片”（AssetUse）：读取选定jar文件内`asset/minecraft`内的数据，直接提取出来使用
+   - “使用已有的图片”（Local）：选定包含图片的文件夹，直接使用里面的图片
+ - 语言文件
+   - “从Minecraft Wiki获取”：暂时未想到解决方案
+   - “从外部文件获取”：读取选定json文件，并提取方块和物品译名，如果文件名不是语言代码，则询问用户该文件属于哪个语言
+     - 默认从`https://github.com/InventivetalentDev/minecraft-assets/blob/$版本$/assets/minecraft/lang/$语言$.json`

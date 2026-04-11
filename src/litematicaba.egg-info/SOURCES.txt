@@ -40,7 +40,6 @@ src/litematicaba/ui/pages/pick_page.py
 src/litematicaba/ui/pages/placeholders.py
 src/litematicaba/ui/pages/project_page.py
 src/litematicaba/ui/pages/properties_page.py
-src/litematicaba/ui/pages/settings_page.py
 src/litematicaba/ui/pages/ui_test_page.py
 src/litematicaba/ui/resources/__init__.py
 src/litematicaba/ui/themes/__init__.py
