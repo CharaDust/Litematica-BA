@@ -34,6 +34,9 @@ class AppSettings:
     tile_auto_place_preferred_cols: int = 12
     tile_view_right_padding_px: int = 64
     show_widget_inspector: bool = False
+    perf_test_overlay: bool = False
+    # Deepslate / WebView 渲染包：默认不在启动时联网检查；见 design §2.0.4、§2.6.3.9
+    deepslate_check_updates_on_startup: bool = False
 
     def normalized(self) -> AppSettings:
         t = self.theme_id if self.theme_id in VALID_THEMES else DEFAULT_THEME
@@ -44,6 +47,8 @@ class AppSettings:
             tile_auto_place_preferred_cols=max(1, min(64, int(self.tile_auto_place_preferred_cols))),
             tile_view_right_padding_px=max(0, min(300, int(self.tile_view_right_padding_px))),
             show_widget_inspector=bool(self.show_widget_inspector),
+            perf_test_overlay=bool(self.perf_test_overlay),
+            deepslate_check_updates_on_startup=bool(self.deepslate_check_updates_on_startup),
         )
 
 
@@ -66,6 +71,8 @@ def load_settings() -> AppSettings:
         tile_auto_place_preferred_cols=int(raw.get("tile_auto_place_preferred_cols", 9)),
         tile_view_right_padding_px=int(raw.get("tile_view_right_padding_px", 64)),
         show_widget_inspector=bool(raw.get("show_widget_inspector", False)),
+        perf_test_overlay=bool(raw.get("perf_test_overlay", False)),
+        deepslate_check_updates_on_startup=bool(raw.get("deepslate_check_updates_on_startup", False)),
     ).normalized()
 
 

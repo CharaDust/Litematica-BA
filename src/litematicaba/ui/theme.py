@@ -138,6 +138,9 @@ def apply_theme(app: QApplication | None, theme_id: str) -> None:
     if app is None:
         return
     tid = normalize_theme_id(theme_id)
+    prop = app.property(THEME_PROP)
+    if isinstance(prop, str) and normalize_theme_id(prop) == tid:
+        return
     _ensure_base_style(app)
     _ensure_theme_fonts(tid)
     app.setProperty(THEME_PROP, tid)

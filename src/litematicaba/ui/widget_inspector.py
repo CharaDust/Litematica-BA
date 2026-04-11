@@ -113,6 +113,8 @@ class WidgetInspectorController:
         self._enabled = False
 
     def set_enabled(self, on: bool) -> None:
+        if on == self._enabled:
+            return
         self._enabled = on
         if on:
             self._sync_geometry()

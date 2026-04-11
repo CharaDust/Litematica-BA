@@ -26,6 +26,7 @@ from litematicaba.ui.pages import (
     UiTestPage,
 )
 from litematicaba.ui.theme import apply_theme, current_theme_id
+from litematicaba.ui.perf_test_overlay import PerfTestController
 from litematicaba.ui.widget_inspector import WidgetInspectorController
 from litematicaba.ui.widgets.nav_expand import NavExpandButton
 from litematicaba.ui.widgets.nav_item import NavItemButton
@@ -161,6 +162,8 @@ class MainWindow(QWidget):
         self._apply_sidebar_geometry()
         self._widget_inspector = WidgetInspectorController(self)
         self._widget_inspector.set_enabled(self._settings.show_widget_inspector)
+        self._perf_test = PerfTestController(self)
+        self._perf_test.set_enabled(self._settings.perf_test_overlay)
         self._btn_home.setChecked(True)
         self._stack.setCurrentIndex(PAGE_HOME)
 
@@ -170,10 +173,12 @@ class MainWindow(QWidget):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._widget_inspector.sync_geometry()
+        self._perf_test.sync_geometry()
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self._widget_inspector.sync_geometry()
+        self._perf_test.sync_geometry()
         self._clamp_window_to_available_geometry()
 
     def _clamp_window_to_available_geometry(self) -> None:
@@ -254,6 +259,7 @@ class MainWindow(QWidget):
         apply_theme(QApplication.instance(), s.theme_id)
         self._btn_ui_test.setVisible(s.show_ui_test_nav)
         self._widget_inspector.set_enabled(s.show_widget_inspector)
+        self._perf_test.set_enabled(s.perf_test_overlay)
         self._ui_test_page.apply_settings(s)
         self._properties_page.apply_regions_table_theme()
         self._apply_sidebar_geometry()
