@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 def _to_int(value, default: int = 0) -> int:
@@ -40,6 +40,7 @@ def _to_int32_signed(value: int) -> int:
 class SnbtProperties:
     file_path: Path | None = None
     file_name: str = ""
+    internal_name: str = ""
     author: str = ""
     description: str = ""
     created_unix: int = 0
@@ -50,6 +51,11 @@ class SnbtProperties:
     litematic_version: int = 0
     minecraft_data_version: int = 0
     preview_image_data: list[int] = field(default_factory=list)
+
+
+def copy_snbt_properties(data: SnbtProperties) -> SnbtProperties:
+    """返回 ``SnbtProperties`` 的独立副本；``preview_image_data`` 会复制列表，避免共享可变状态。"""
+    return replace(data, preview_image_data=list(data.preview_image_data))
 
 
 def _import_amulet_nbt():
@@ -85,6 +91,7 @@ def load_snbt_properties(file_path: str | Path) -> SnbtProperties:
     props = SnbtProperties(
         file_path=path,
         file_name=path.name,
+        internal_name=_to_str(metadata.get("Name"), ""),
         author=_to_str(metadata.get("Author"), ""),
         description=_to_str(metadata.get("Description"), ""),
         created_unix=_to_int(metadata.get("TimeCreated"), 0),
@@ -116,6 +123,7 @@ def save_snbt_properties(data: SnbtProperties, output_path: str | Path | None = 
     if metadata is None:
         raise ValueError("Invalid litematic: missing Metadata compound.")
 
+    metadata["Name"] = StringTag(data.internal_name)
     metadata["Author"] = StringTag(data.author)
     metadata["Description"] = StringTag(data.description)
     metadata["PreviewImageData"] = IntArrayTag([_to_int32_signed(v) for v in data.preview_image_data])

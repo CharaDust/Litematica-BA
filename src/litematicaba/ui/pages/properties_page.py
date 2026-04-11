@@ -1,4 +1,15 @@
-"""属性页（design §2.3）：投影头部元数据 SNBT 读写。"""
+"""属性页（设计文档 §2.3）：Litematica 投影头部元数据的展示与编辑。
+
+本模块实现「属性」标签页 UI，负责：
+- 从 .litematic 文件加载 SNBT 中的 Metadata 相关字段（通过 ``SnbtProperties``）；
+- 在表单中编辑可写字段（文件名、内部名称 Name、作者、描述、预览图等），只读字段展示尺寸、版本、时间戳等；
+- 将修改写回原文件或「另存为」新路径。
+
+状态约定：
+- ``_loading``：为 True 时忽略 ``textChanged`` 触发的脏标记，避免程序化填充 UI 时误标为已修改；
+- ``_dirty``：用户是否改动了相对磁盘上的当前内容；换文件前会据此弹出是否丢弃的确认框。
+- ``_baseline_snapshot``：最近一次成功从磁盘加载后的元数据快照；「恢复默认值」将当前编辑还原为该快照（非清空表单）。
+"""
 
 from __future__ import annotations
 
@@ -22,36 +33,48 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
 
-from litematicaba.core.snbt_properties import SnbtProperties, load_snbt_properties, save_snbt_properties
+from litematicaba.core.snbt_properties import (
+    SnbtProperties,
+    copy_snbt_properties,
+    load_snbt_properties,
+    save_snbt_properties,
+)
 from litematicaba.ui.theme import current_theme_id
 
 
 class _PreviewCanvas(QFrame):
-    """预览图画布：固定 140x140，可缩放显示导入结果。"""
+    """固定 140×140 的预览区域，将任意比例的 ``QPixmap`` 居中、等比缩放后绘制。
+
+    无图时显示占位文案与半透明底，便于与正式预览区分。
+    """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("propertiesPreviewCanvas")
         self.setFrameShape(QFrame.Shape.Box)
         self.setFixedSize(140, 140)
-        self._pixmap: QPixmap | None = None
+        self._pixmap: QPixmap | None = None  # 当前要绘制的位图；None 表示占位状态
 
     def set_preview(self, pixmap: QPixmap | None) -> None:
+        """更新预览内容并触发重绘。"""
         self._pixmap = pixmap
         self.update()
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
         super().paintEvent(event)
         painter = QPainter(self)
+        # 轻微暗底，使浅色预览边缘在浅色主题下仍可见
         painter.fillRect(self.rect(), QColor(20, 20, 20, 18))
         if self._pixmap is None or self._pixmap.isNull():
             painter.setPen(self.palette().mid().color())
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "140 x 140")
             return
+        # KeepAspectRatio：在 140×140 内完整显示，可能留边
         fitted = self._pixmap.scaled(
             self.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -63,15 +86,20 @@ class _PreviewCanvas(QFrame):
 
 
 class PropertiesPage(QWidget):
-    """属性页：加载、编辑并保存 Metadata 属性。"""
+    """主属性页：中间内容为可滚动区域，底部操作按钮条固定在页面下沿（不参与滚动）。"""
 
     def __init__(self) -> None:
         super().__init__()
+        # 初次构建 UI 期间为 True，避免 setText 等触发 _mark_dirty
         self._loading = True
         self._dirty = False
         self._current_data = SnbtProperties()
+        # 内存中的预览图（ARGB）；与文件里 PreviewImageData 列表互转
         self._preview_image = QImage()
+        # 完整路径提示（含未保存星号）；显示用中间省略，完整内容在 ToolTip
         self._full_file_hint_text = ""
+        # 成功 load 后的元数据副本，供「恢复默认值」撤销自打开以来的编辑（保存后亦不自动刷新此快照）
+        self._baseline_snapshot: SnbtProperties | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -80,7 +108,9 @@ class PropertiesPage(QWidget):
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        root.addWidget(scroll)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        root.addWidget(scroll, 1)
 
         body = QWidget()
         body.setMinimumWidth(0)
@@ -94,22 +124,35 @@ class PropertiesPage(QWidget):
         body_l.addLayout(self._build_meta_and_preview_row())
         body_l.addWidget(self._build_version_box())
         body_l.addWidget(self._build_regions_box())
-        body_l.addStretch()
-        body_l.addLayout(self._build_footer_row())
+
+        footer_bar = QWidget()
+        footer_lay = QVBoxLayout(footer_bar)
+        footer_lay.setContentsMargins(16, 8, 16, 16)
+        footer_lay.setSpacing(0)
+        footer_lay.addLayout(self._build_footer_row())
+        root.addWidget(footer_bar)
 
         self._wire_change_tracking()
         self._apply_model_to_ui(self._current_data)
         self._loading = False
+        # 允许 QLineEdit 在窄布局下收缩，避免把整行撑得过宽
         self._apply_line_edit_horizontal_shrink()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
+        # 路径标签宽度随窗口变化，需重新计算中间省略
         self._update_file_hint_elide()
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        # Minecraft 主题下列较窄时 SNBT 表单易挤成一团，给左列设最小宽度
         self._apply_snbt_column_min_width()
+        # 首帧布局完成后宽度才稳定，延迟一次省略计算
         QTimer.singleShot(0, self._update_file_hint_elide)
+
+    # -------------------------------------------------------------------------
+    # UI 构建：自上而下与主窗口 body 结构一致
+    # -------------------------------------------------------------------------
 
     def _build_file_select_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -127,6 +170,7 @@ class PropertiesPage(QWidget):
         return row
 
     def _build_basic_meta_box(self) -> QGroupBox:
+        """可编辑的显示用文件名（写入 SNBT 的 Metadata 名称字段，与磁盘文件名可不同）。"""
         box = QGroupBox("文件")
         form = QFormLayout(box)
         self._file_name_edit = QLineEdit()
@@ -135,6 +179,7 @@ class PropertiesPage(QWidget):
         return box
 
     def _build_meta_and_preview_row(self) -> QHBoxLayout:
+        """左侧 SNBT 表单（stretch 2）+ 右侧预览（stretch 1），横向并排。"""
         row = QHBoxLayout()
         row.setSpacing(12)
         self._snbt_column = QWidget()
@@ -150,9 +195,11 @@ class PropertiesPage(QWidget):
         return row
 
     def _build_snbt_box(self) -> QGroupBox:
+        """Metadata 字段：内部名称/作者/描述可编辑（对应 ``Name``、``Author``、``Description``），其余只读。"""
         box = QGroupBox("SNBT 元数据")
         form = QFormLayout(box)
 
+        self._internal_name_edit = QLineEdit()
         self._author_edit = QLineEdit()
         self._description_edit = QLineEdit()
         self._created_time_readonly = QLineEdit()
@@ -163,6 +210,7 @@ class PropertiesPage(QWidget):
         self._total_blocks_readonly = QLineEdit()
         self._total_volume_readonly = QLineEdit()
 
+        # 时间、包围盒尺寸、方块数等由解析结果决定，用户在此页不可直接改 SNBT 中的这些统计字段
         self._created_time_readonly.setReadOnly(True)
         self._modified_time_readonly.setReadOnly(True)
         self._size_x_readonly.setReadOnly(True)
@@ -179,8 +227,9 @@ class PropertiesPage(QWidget):
         ):
             w.setMaximumWidth(120)
 
-        form.addRow("作者（Author）：", self._author_edit)
-        form.addRow("描述（Description）：", self._description_edit)
+        form.addRow("内部名称：", self._internal_name_edit)
+        form.addRow("作者：", self._author_edit)
+        form.addRow("描述：", self._description_edit)
         form.addRow("创建时间：", self._created_time_readonly)
         form.addRow("修改时间：", self._modified_time_readonly)
         form.addRow("尺寸：", self._build_size_row_widget())
@@ -215,6 +264,7 @@ class PropertiesPage(QWidget):
         return w
 
     def _build_preview_box(self) -> QGroupBox:
+        """PreviewImageData：导入外部图或从文件加载；缩放算法影响写入 140×140 时的采样方式。"""
         box = QGroupBox("预览图")
         lay = QVBoxLayout(box)
         lay.setSpacing(8)
@@ -241,6 +291,7 @@ class PropertiesPage(QWidget):
         return box
 
     def _build_version_box(self) -> QGroupBox:
+        """Litematica 文件格式版本与 Minecraft 数据版本，仅展示。"""
         box = QGroupBox("版本信息")
         form = QFormLayout(box)
         self._litematica_ver_readonly = QLineEdit()
@@ -253,6 +304,7 @@ class PropertiesPage(QWidget):
         return box
 
     def _build_regions_box(self) -> QGroupBox:
+        """占位：区域与子卷信息将在后续版本接入真实数据。"""
         box = QGroupBox("区域列表（后续设计）")
         lay = QVBoxLayout(box)
         self._regions_list = QListWidget()
@@ -262,7 +314,20 @@ class PropertiesPage(QWidget):
         return box
 
     def _build_footer_row(self) -> QHBoxLayout:
+        """保存 / 另存为 / 恢复为打开文件时的快照；转换格式尚未实现。
+
+        由 ``__init__`` 放入 ``PropertiesPage`` 根布局底部，置于 ``QScrollArea`` 之外，故不随表单滚动。
+
+        相邻按钮间距 = 当前样式 ``PM_LayoutHorizontalSpacing`` + 8px（该指标为 -1 时按 6px 计），避免 Metro10 / Minecraft 等大按钮主题下控件挤在一起。
+        """
         row = QHBoxLayout()
+        style = self.style()
+        base = 6
+        if style is not None:
+            pm = style.pixelMetric(QStyle.PixelMetric.PM_LayoutHorizontalSpacing)
+            if pm >= 0:
+                base = pm
+        row.setSpacing(base + 8)
         row.addStretch()
         self._btn_save = QPushButton("保存")
         self._btn_save_as = QPushButton("另存为")
@@ -282,11 +347,18 @@ class PropertiesPage(QWidget):
         return row
 
     def _wire_change_tracking(self) -> None:
+        """仅对会写回 SNBT 的输入框挂接脏标记；只读控件不连接。"""
         self._file_name_edit.textChanged.connect(self._mark_dirty)
+        self._internal_name_edit.textChanged.connect(self._mark_dirty)
         self._author_edit.textChanged.connect(self._mark_dirty)
         self._description_edit.textChanged.connect(self._mark_dirty)
 
+    # -------------------------------------------------------------------------
+    # 槽函数：文件选择、预览、保存
+    # -------------------------------------------------------------------------
+
     def _on_choose_external_file(self) -> None:
+        """通过系统对话框打开 .litematic；若有未保存修改先确认是否丢弃。"""
         if not self._confirm_discard_if_dirty():
             return
         path, _ = QFileDialog.getOpenFileName(
@@ -300,15 +372,18 @@ class PropertiesPage(QWidget):
         self._load_from_file(path)
 
     def _on_choose_from_library(self) -> None:
+        """项目内「库」选择器尚未接入。"""
         self._show_not_implemented("在库中选择")
 
     def _on_clear_preview(self) -> None:
+        """清空内存预览与画布，并标记脏（将写入空的 PreviewImageData）。"""
         self._preview_image = QImage()
         self._preview_canvas.set_preview(None)
         self._preview_count_hint.setText("PreviewImageData: 0 项")
         self._mark_dirty()
 
     def _on_import_preview(self) -> None:
+        """居中裁成正方形后缩放到 140×140，与 Litematica 常见预览尺寸一致。"""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "导入预览图",
@@ -323,6 +398,7 @@ class PropertiesPage(QWidget):
             QMessageBox.warning(self, "导入预览图", "图片读取失败，请更换文件后重试。")
             return
 
+        # 取最短边为边长，从中心裁剪，避免非正方形原图被强行拉伸变形
         side = min(raw.width(), raw.height())
         crop_x = (raw.width() - side) // 2
         crop_y = (raw.height() - side) // 2
@@ -338,21 +414,26 @@ class PropertiesPage(QWidget):
         )
         pix = QPixmap.fromImage(self._preview_image)
         self._preview_canvas.set_preview(pix)
+        # 固定 140×140 像素 → ARGB 列表长度恒为 19600
         self._preview_count_hint.setText(f"PreviewImageData: {140 * 140} 项")
         self._mark_dirty()
 
     def _on_restore_defaults(self) -> None:
+        """用打开文件时保存的快照覆盖当前模型与 UI，撤销自加载以来的编辑；不重新读盘。"""
         if self._current_data.file_path is None:
             QMessageBox.information(self, "恢复默认值", "请先加载一个投影文件。")
             return
-        self._author_edit.clear()
-        self._description_edit.clear()
-        self._created_time_readonly.setText(self._format_timestamp(0))
-        self._modified_time_readonly.setText(self._format_timestamp(0))
-        self._on_clear_preview()
-        self._mark_dirty()
+        if self._baseline_snapshot is None:
+            QMessageBox.information(self, "恢复默认值", "没有可用的加载快照，请重新打开该文件。")
+            return
+        self._loading = True
+        self._dirty = False
+        self._current_data = copy_snbt_properties(self._baseline_snapshot)
+        self._apply_model_to_ui(self._current_data)
+        self._loading = False
 
     def _on_save(self) -> None:
+        """写回 ``_current_data.file_path``；成功后用新模型替换内存状态并清除脏标记。"""
         if self._current_data.file_path is None:
             QMessageBox.information(self, "保存", "请先选择一个 .litematic 文件。")
             return
@@ -368,6 +449,7 @@ class PropertiesPage(QWidget):
         QMessageBox.information(self, "保存", "已保存到原文件。")
 
     def _on_save_as(self) -> None:
+        """写入用户选择的新路径，随后 ``_load_from_file`` 切换到该文件作为当前上下文。"""
         if self._current_data.file_path is None:
             QMessageBox.information(self, "另存为", "请先选择一个 .litematic 文件。")
             return
@@ -389,19 +471,23 @@ class PropertiesPage(QWidget):
         self._load_from_file(written)
 
     def _load_from_file(self, file_path: str | Path) -> None:
+        """解析 SNBT 填充 ``SnbtProperties``，并在 ``_loading`` 保护下刷新全部控件。"""
         try:
             data = load_snbt_properties(file_path)
         except Exception as exc:
             QMessageBox.critical(self, "打开失败", f"读取 SNBT 失败：\n{exc}")
             return
         self._current_data = data
+        self._baseline_snapshot = copy_snbt_properties(data)
         self._dirty = False
         self._loading = True
         self._apply_model_to_ui(data)
         self._loading = False
 
     def _apply_model_to_ui(self, data: SnbtProperties) -> None:
+        """单向：数据模型 → 控件文本与预览；不修改 ``_dirty``（由调用方控制）。"""
         self._file_name_edit.setText(data.file_name)
+        self._internal_name_edit.setText(data.internal_name)
         self._author_edit.setText(data.author)
         self._description_edit.setText(data.description)
         self._created_time_readonly.setText(self._format_timestamp(data.created_unix))
@@ -418,11 +504,13 @@ class PropertiesPage(QWidget):
         self._sync_title_hint()
 
     def _apply_line_edit_horizontal_shrink(self) -> None:
+        """构造完成后统一收紧所有 QLineEdit，利于窄窗口与表单对齐。"""
         for w in self.findChildren(QLineEdit):
             w.setMinimumWidth(0)
             w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def _apply_snbt_column_min_width(self) -> None:
+        """Minecraft 主题字体/样式下表单更易折行，为 SNBT 列保留最小可读宽度。"""
         app = QApplication.instance()
         tid = current_theme_id(app) if app is not None else "QTDefault"
         if tid == "Minecraft":
@@ -431,6 +519,7 @@ class PropertiesPage(QWidget):
             self._snbt_column.setMinimumWidth(0)
 
     def _update_file_hint_elide(self) -> None:
+        """根据标签可用宽度对路径做中间省略；过窄时用父行宽度估算（减去两侧按钮大致占位）。"""
         text = self._full_file_hint_text
         w = self._active_file_hint.width()
         if w < 48:
@@ -445,9 +534,11 @@ class PropertiesPage(QWidget):
         self._active_file_hint.setText(elided)
 
     def _collect_ui_to_model(self) -> SnbtProperties:
+        """从控件组装即将写入磁盘的模型：修改时间取当前毫秒，其余统计/版本沿用加载时的值。"""
         model = SnbtProperties(
             file_path=self._current_data.file_path,
             file_name=self._file_name_edit.text().strip(),
+            internal_name=self._internal_name_edit.text().strip(),
             author=self._author_edit.text().strip(),
             description=self._description_edit.text().strip(),
             created_unix=self._current_data.created_unix,
@@ -462,6 +553,10 @@ class PropertiesPage(QWidget):
         return model
 
     def _set_preview_from_argb_list(self, data: list[int]) -> None:
+        """将文件中的 PreviewImageData（每元素 32 位 ARGB）还原为 ``QImage`` 并显示。
+
+        仅当列表长度为完全平方数时才认为合法；否则清空预览且不标脏（加载阶段）。
+        """
         if not data:
             self._on_clear_preview_no_dirty()
             return
@@ -473,12 +568,14 @@ class PropertiesPage(QWidget):
         for y in range(side):
             base = y * side
             for x in range(side):
+                # 与 Qt 像素一致，掩掉高位防止有符号扩展问题
                 image.setPixel(x, y, int(data[base + x]) & 0xFFFFFFFF)
         self._preview_image = image
         self._preview_canvas.set_preview(QPixmap.fromImage(self._preview_image))
         self._preview_count_hint.setText(f"PreviewImageData: {len(data)} 项")
 
     def _preview_to_argb_list(self) -> list[int]:
+        """将当前 ``_preview_image`` 按行主序展开为与 SNBT 互操作的 int 列表（ARGB32）。"""
         if self._preview_image.isNull():
             return []
         image = self._preview_image.convertToFormat(QImage.Format.Format_ARGB32)
@@ -489,11 +586,13 @@ class PropertiesPage(QWidget):
         return out
 
     def _on_clear_preview_no_dirty(self) -> None:
+        """与 ``_on_clear_preview`` 相同视觉效果，但不调用 ``_mark_dirty``（用于加载失败或非法数据）。"""
         self._preview_image = QImage()
         self._preview_canvas.set_preview(None)
         self._preview_count_hint.setText("PreviewImageData: 0 项")
 
     def _confirm_discard_if_dirty(self) -> bool:
+        """返回 True 表示可继续（无脏数据或用户确认丢弃）。"""
         if not self._dirty:
             return True
         ans = QMessageBox.question(
@@ -506,12 +605,14 @@ class PropertiesPage(QWidget):
         return ans == QMessageBox.StandardButton.Yes
 
     def _mark_dirty(self) -> None:
+        """由可编辑控件信号触发；加载模型期间由 ``_loading`` 短路。"""
         if self._loading:
             return
         self._dirty = True
         self._sync_title_hint()
 
     def _sync_title_hint(self) -> None:
+        """更新顶部路径文案、ToolTip 与省略显示；未保存时在文案末尾追加 `` *``。"""
         base = str(self._current_data.file_path) if self._current_data.file_path else "当前未激活文件"
         self._full_file_hint_text = f"{base}{' *' if self._dirty else ''}"
         self._active_file_hint.setToolTip(self._full_file_hint_text)
@@ -519,6 +620,10 @@ class PropertiesPage(QWidget):
 
     @staticmethod
     def _format_timestamp(ts: int) -> str:
+        """将 Unix 时间格式化为本地可读字符串。
+
+        Litematica 常用毫秒（>1e10 阈值），否则按秒处理；无效或异常时退回原始数字或 ``-``。
+        """
         if ts <= 0:
             return "-"
         try:
@@ -529,4 +634,5 @@ class PropertiesPage(QWidget):
             return str(ts)
 
     def _show_not_implemented(self, action: str) -> None:
+        """占位功能的统一提示，避免静默无响应。"""
         QMessageBox.information(self, "属性页", f"{action} 功能将在后续接入真实读写逻辑。")
