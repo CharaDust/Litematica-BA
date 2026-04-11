@@ -100,6 +100,11 @@ class _PreviewCanvas(QFrame):
 class PropertiesPage(QWidget):
     """主属性页：中间内容为可滚动区域，底部操作按钮条固定在页面下沿（不参与滚动）。"""
 
+    @staticmethod
+    def _align_numeric_line_edit(w: QLineEdit) -> None:
+        """尺寸、体积、版本号等纯数字只读框：文本右对齐便于纵列对比位数。"""
+        w.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
     def __init__(self) -> None:
         super().__init__()
         # 初次构建 UI 期间为 True，避免 setText 等触发 _mark_dirty
@@ -262,6 +267,7 @@ class PropertiesPage(QWidget):
             self._density_readonly,
         ):
             w.setMaximumWidth(120)
+            self._align_numeric_line_edit(w)
 
         form.addRow("内部名称：", self._internal_name_edit)
         form.addRow("作者：", self._author_edit)
@@ -337,6 +343,8 @@ class PropertiesPage(QWidget):
         self._mc_data_ver_readonly = QLineEdit()
         self._litematica_ver_readonly.setReadOnly(True)
         self._mc_data_ver_readonly.setReadOnly(True)
+        self._align_numeric_line_edit(self._litematica_ver_readonly)
+        self._align_numeric_line_edit(self._mc_data_ver_readonly)
         form.addRow("投影文件版本：", self._litematica_ver_readonly)
         form.addRow("Minecraft 数据版本：", self._mc_data_ver_readonly)
         form.setHorizontalSpacing(8)
