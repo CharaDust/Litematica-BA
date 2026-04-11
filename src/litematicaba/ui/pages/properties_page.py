@@ -2,13 +2,19 @@
 
 本模块实现「属性」标签页 UI，负责：
 - 从 .litematic 文件加载 SNBT 中的 Metadata 相关字段（通过 ``SnbtProperties``）；
-- 在表单中编辑可写字段（文件名、内部名称 Name、作者、描述、预览图等），只读字段展示尺寸、版本、时间戳等；
+- 在表单中编辑可写字段（展示用 ``file_name``、Metadata ``Name``/作者/描述、预览图等），只读字段展示尺寸、版本、时间戳、**密度**等；
 - 将修改写回原文件或「另存为」新路径。
+
+**布局：** 中间 ``QScrollArea`` 承载表单（stretch=1），底部 ``footer_bar`` 单独一行承载保存等按钮，按钮条不随内容滚动。
+
+**密度（体积行）：** 非 SNBT 持久化字段，由 ``TotalBlocks / TotalVolume`` 派生，格式为一位小数的百分数，表示非空气方块占包围体素格数的比例；``TotalVolume<=0`` 时显示 ``-``。
+
+**内部名称：** 对应 Metadata 的 ``Name`` 字符串，与「文件」分组中的显示用 ``file_name``（默认与磁盘文件名一致）语义不同。
 
 状态约定：
 - ``_loading``：为 True 时忽略 ``textChanged`` 触发的脏标记，避免程序化填充 UI 时误标为已修改；
 - ``_dirty``：用户是否改动了相对磁盘上的当前内容；换文件前会据此弹出是否丢弃的确认框。
-- ``_baseline_snapshot``：最近一次成功从磁盘加载后的元数据快照；「恢复默认值」将当前编辑还原为该快照（非清空表单）。
+- ``_baseline_snapshot``：最近一次成功从磁盘加载后的元数据快照；「恢复默认值」将当前编辑还原为该快照（非清空表单）；**保存到原文件不会刷新快照**。
 """
 
 from __future__ import annotations
@@ -110,6 +116,7 @@ class PropertiesPage(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # stretch=1：滚动区占满标题栏与页脚之间的剩余高度；页脚始终在可视区域底边
         root.addWidget(scroll, 1)
 
         body = QWidget()
@@ -125,6 +132,7 @@ class PropertiesPage(QWidget):
         body_l.addWidget(self._build_version_box())
         body_l.addWidget(self._build_regions_box())
 
+        # 与 body 左右边距对齐；上 8px 与滚动内容留出缝隙，下 16px 贴窗口底
         footer_bar = QWidget()
         footer_lay = QVBoxLayout(footer_bar)
         footer_lay.setContentsMargins(16, 8, 16, 16)
@@ -170,7 +178,10 @@ class PropertiesPage(QWidget):
         return row
 
     def _build_basic_meta_box(self) -> QGroupBox:
-        """可编辑的显示用文件名（写入 SNBT 的 Metadata 名称字段，与磁盘文件名可不同）。"""
+        """「文件名称」：UI 展示用名，当前实现中与加载路径的 ``path.name`` 同步，**不是** Metadata ``Name``。
+
+        真正的内部标识见 SNBT 分组中的「内部名称」（``internal_name`` ↔ ``Metadata.Name``）。
+        """
         box = QGroupBox("文件")
         form = QFormLayout(box)
         self._file_name_edit = QLineEdit()
@@ -195,10 +206,16 @@ class PropertiesPage(QWidget):
         return row
 
     def _build_snbt_box(self) -> QGroupBox:
-        """Metadata 字段：内部名称/作者/描述可编辑（对应 ``Name``、``Author``、``Description``），其余只读。"""
+        """Metadata 主表单。
+
+        写回 ``save_snbt_properties`` 的字符串字段由本分组的可编辑行提供：``Name``/``Author``/``Description``（及预览像素数组，见预览区）。
+        「文件」分组里的 ``file_name`` 属独立控件，**无对应 Metadata 键**，另存为默认名等使用 ``SnbtProperties.file_name``。
+        只读：时间、包围尺寸、``TotalBlocks``/``TotalVolume``、**密度**（两统计量比值，不落盘）。
+        """
         box = QGroupBox("SNBT 元数据")
         form = QFormLayout(box)
 
+        # Litematica Metadata.Name：游戏/材料列表等使用的内部名，可与磁盘文件名不同
         self._internal_name_edit = QLineEdit()
         self._author_edit = QLineEdit()
         self._description_edit = QLineEdit()
@@ -209,8 +226,10 @@ class PropertiesPage(QWidget):
         self._size_z_readonly = QLineEdit()
         self._total_blocks_readonly = QLineEdit()
         self._total_volume_readonly = QLineEdit()
+        # 占用率 = TotalBlocks/TotalVolume，仅展示；保存时不写入 NBT（无对应键）
+        self._density_readonly = QLineEdit()
 
-        # 时间、包围盒尺寸、方块数等由解析结果决定，用户在此页不可直接改 SNBT 中的这些统计字段
+        # 时间、包围盒尺寸、方块/总计/密度等由文件解析结果派生，用户不可在此直接改 SNBT 统计字段
         self._created_time_readonly.setReadOnly(True)
         self._modified_time_readonly.setReadOnly(True)
         self._size_x_readonly.setReadOnly(True)
@@ -218,12 +237,14 @@ class PropertiesPage(QWidget):
         self._size_z_readonly.setReadOnly(True)
         self._total_blocks_readonly.setReadOnly(True)
         self._total_volume_readonly.setReadOnly(True)
+        self._density_readonly.setReadOnly(True)
         for w in (
             self._size_x_readonly,
             self._size_y_readonly,
             self._size_z_readonly,
             self._total_blocks_readonly,
             self._total_volume_readonly,
+            self._density_readonly,
         ):
             w.setMaximumWidth(120)
 
@@ -252,6 +273,7 @@ class PropertiesPage(QWidget):
         return w
 
     def _build_volume_row_widget(self) -> QWidget:
+        """单行展示 ``TotalBlocks``、``TotalVolume`` 及由二者计算的密度百分数。"""
         w = QWidget()
         row = QHBoxLayout(w)
         row.setContentsMargins(0, 0, 0, 0)
@@ -260,6 +282,8 @@ class PropertiesPage(QWidget):
         row.addWidget(self._total_blocks_readonly)
         row.addWidget(QLabel("总计:"))
         row.addWidget(self._total_volume_readonly)
+        row.addWidget(QLabel("密度:"))
+        row.addWidget(self._density_readonly)
         row.addStretch()
         return w
 
@@ -321,6 +345,7 @@ class PropertiesPage(QWidget):
         相邻按钮间距 = 当前样式 ``PM_LayoutHorizontalSpacing`` + 8px（该指标为 -1 时按 6px 计），避免 Metro10 / Minecraft 等大按钮主题下控件挤在一起。
         """
         row = QHBoxLayout()
+        # 在主题默认水平间距上 +8px，避免高按钮样式（Metro10、Minecraft）下相邻按钮视觉粘连
         style = self.style()
         base = 6
         if style is not None:
@@ -419,7 +444,11 @@ class PropertiesPage(QWidget):
         self._mark_dirty()
 
     def _on_restore_defaults(self) -> None:
-        """用打开文件时保存的快照覆盖当前模型与 UI，撤销自加载以来的编辑；不重新读盘。"""
+        """用 ``_baseline_snapshot`` 覆盖 ``_current_data`` 并刷新 UI。
+
+        先置 ``_dirty=False`` 再 ``_apply_model_to_ui``，避免路径标签仍带未保存星号。
+        快照仅在 ``_load_from_file`` 成功时更新；保存、编辑不会改写快照。
+        """
         if self._current_data.file_path is None:
             QMessageBox.information(self, "恢复默认值", "请先加载一个投影文件。")
             return
@@ -471,7 +500,10 @@ class PropertiesPage(QWidget):
         self._load_from_file(written)
 
     def _load_from_file(self, file_path: str | Path) -> None:
-        """解析 SNBT 填充 ``SnbtProperties``，并在 ``_loading`` 保护下刷新全部控件。"""
+        """解析 SNBT 填充 ``SnbtProperties``，并在 ``_loading`` 保护下刷新全部控件。
+
+        成功后同步更新 ``_baseline_snapshot``，供「恢复默认值」使用。
+        """
         try:
             data = load_snbt_properties(file_path)
         except Exception as exc:
@@ -498,6 +530,8 @@ class PropertiesPage(QWidget):
         self._size_z_readonly.setText(str(ez))
         self._total_blocks_readonly.setText(str(data.total_blocks))
         self._total_volume_readonly.setText(str(data.total_volume))
+        # 密度随方块数/总计刷新；不参与 _collect_ui_to_model
+        self._density_readonly.setText(self._format_block_density_pct(data.total_blocks, data.total_volume))
         self._litematica_ver_readonly.setText(str(data.litematic_version))
         self._mc_data_ver_readonly.setText(str(data.minecraft_data_version))
         self._set_preview_from_argb_list(data.preview_image_data)
@@ -534,7 +568,11 @@ class PropertiesPage(QWidget):
         self._active_file_hint.setText(elided)
 
     def _collect_ui_to_model(self) -> SnbtProperties:
-        """从控件组装即将写入磁盘的模型：修改时间取当前毫秒，其余统计/版本沿用加载时的值。"""
+        """从控件组装即将写入磁盘的模型。
+
+        修改时间取当前毫秒；``TotalBlocks``/``TotalVolume``/包围尺寸/版本等沿用 ``_current_data``（用户在本页不能改统计）。
+        密度为派生显示，不包含在 ``SnbtProperties`` 中。
+        """
         model = SnbtProperties(
             file_path=self._current_data.file_path,
             file_name=self._file_name_edit.text().strip(),
@@ -632,6 +670,18 @@ class PropertiesPage(QWidget):
             return dt.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             return str(ts)
+
+    @staticmethod
+    def _format_block_density_pct(blocks: int, volume: int) -> str:
+        """将 ``TotalBlocks``（非空气方块数）与 ``TotalVolume``（包围体素格数）转为占用率字符串。
+
+        公式 ``100 * blocks / volume``，输出形如 ``12.3%``（固定一位小数）。
+        ``volume <= 0`` 时无法定义比例，返回 ``-``（例如未加载或损坏元数据）。
+        """
+        if volume <= 0:
+            return "-"
+        pct = 100.0 * float(blocks) / float(volume)
+        return f"{pct:.1f}%"
 
     def _show_not_implemented(self, action: str) -> None:
         """占位功能的统一提示，避免静默无响应。"""

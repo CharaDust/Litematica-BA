@@ -1,4 +1,9 @@
-"""Litematic 属性区（Metadata）读写。"""
+"""Litematic 属性区（Metadata）读写。
+
+通过 amulet_nbt 读写压缩 NBT，与属性页 ``PropertiesPage`` 使用的 ``SnbtProperties`` 对齐。
+当前保存路径会改写：``Metadata.Name`` / ``Author`` / ``Description`` / ``PreviewImageData`` / ``TimeModified``；
+其余键保持文件原有内容（如 ``TotalBlocks``、``EnclosingSize`` 等由游戏或其它工具维护）。
+"""
 
 from __future__ import annotations
 
@@ -39,7 +44,9 @@ def _to_int32_signed(value: int) -> int:
 @dataclass(slots=True)
 class SnbtProperties:
     file_path: Path | None = None
+    # 加载时设为 path.name；UI「文件名称」编辑框绑定此字段，另存为默认名等使用，**非** SNBT 中的 Name
     file_name: str = ""
+    # 对应 Metadata compound 的 ``Name`` 字符串（Litematica 内部/材料列表等引用）
     internal_name: str = ""
     author: str = ""
     description: str = ""
@@ -54,7 +61,11 @@ class SnbtProperties:
 
 
 def copy_snbt_properties(data: SnbtProperties) -> SnbtProperties:
-    """返回 ``SnbtProperties`` 的独立副本；``preview_image_data`` 会复制列表，避免共享可变状态。"""
+    """返回 ``SnbtProperties`` 的独立副本。
+
+    ``preview_image_data`` 必须 ``list(...)`` 复制，否则快照与当前编辑会共享同一列表引用；
+    其它字段为不可变或标量，浅拷贝 ``replace`` 即可。用于「恢复默认值」基线与 ``_current_data`` 分离。
+    """
     return replace(data, preview_image_data=list(data.preview_image_data))
 
 
@@ -69,6 +80,7 @@ def _import_amulet_nbt():
 
 
 def load_snbt_properties(file_path: str | Path) -> SnbtProperties:
+    """读取 .litematic，抽出 ``Metadata`` 与根级 ``Version`` 等到 ``SnbtProperties``。"""
     _, _, _, NamedTag, _, load = _import_amulet_nbt()
     path = Path(file_path)
     nbt: NamedTag = load(str(path), compressed=True)
@@ -111,6 +123,7 @@ def load_snbt_properties(file_path: str | Path) -> SnbtProperties:
 
 
 def save_snbt_properties(data: SnbtProperties, output_path: str | Path | None = None) -> Path:
+    """从 ``data.file_path`` 读入完整 NBT，覆写可编辑 Metadata 字段后写入 ``output_path``（默认原路径）。"""
     IntArrayTag, IntTag, LongTag, NamedTag, StringTag, load = _import_amulet_nbt()
     if data.file_path is None:
         raise ValueError("file_path is empty, cannot save.")
@@ -123,6 +136,7 @@ def save_snbt_properties(data: SnbtProperties, output_path: str | Path | None = 
     if metadata is None:
         raise ValueError("Invalid litematic: missing Metadata compound.")
 
+    # Name：与 UI「内部名称」一致；缺失时由本调用补写 StringTag
     metadata["Name"] = StringTag(data.internal_name)
     metadata["Author"] = StringTag(data.author)
     metadata["Description"] = StringTag(data.description)
