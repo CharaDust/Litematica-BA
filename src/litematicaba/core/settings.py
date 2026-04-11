@@ -1,4 +1,8 @@
-"""应用选项持久化（JSON，位于 ``data/settings.json``）。"""
+"""应用选项持久化（JSON）。
+
+源码运行：``<仓库>/data/settings.json``。
+打包后：``<exe 所在目录>/data/settings.json``。
+"""
 
 from __future__ import annotations
 

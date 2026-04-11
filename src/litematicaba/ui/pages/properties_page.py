@@ -4,6 +4,7 @@
 - 从 .litematic 文件加载 SNBT 中的 Metadata 相关字段（通过 ``SnbtProperties``）；
 - 在表单中编辑可写字段（展示用 ``file_name``、Metadata ``Name``/作者/描述、预览图等），只读字段展示尺寸、版本、时间戳、**密度**等；
 - 将修改写回原文件或「另存为」新路径。
+- 根级 ``Regions``：表格展示各子区域名称（可编辑）、``Size``/``Position`` 的 x/y/z（只读）；保存时按行顺序重写 ``Regions`` 键名。
 
 **布局：** 中间 ``QScrollArea`` 承载表单（stretch=1），底部 ``footer_bar`` 单独一行承载保存等按钮，按钮条不随内容滚动。
 
@@ -34,23 +35,28 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
+    QAbstractItemView,
     QMessageBox,
     QPushButton,
+    QHeaderView,
     QScrollArea,
     QSizePolicy,
     QStyle,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from litematicaba.core.snbt_properties import (
+    RegionInfo,
     SnbtProperties,
     copy_snbt_properties,
     load_snbt_properties,
+    regions_after_save_commit,
     save_snbt_properties,
 )
 from litematicaba.ui.theme import current_theme_id
+from litematicaba.ui.widgets.themed_plain_table import ThemedPlainQTableWidget
 
 
 class _PreviewCanvas(QFrame):
@@ -155,8 +161,17 @@ class PropertiesPage(QWidget):
         super().showEvent(event)
         # Minecraft 主题下列较窄时 SNBT 表单易挤成一团，给左列设最小宽度
         self._apply_snbt_column_min_width()
+        self.apply_regions_table_theme()
         # 首帧布局完成后宽度才稳定，延迟一次省略计算
         QTimer.singleShot(0, self._update_file_hint_elide)
+
+    def apply_regions_table_theme(self) -> None:
+        """与 UI 测试页内容列表一致，随全局主题刷新区域表样式与行高。"""
+        app = QApplication.instance()
+        if app is None:
+            return
+        self._regions_table.apply_theme(current_theme_id(app))
+        self._regions_table.sync_row_heights()
 
     # -------------------------------------------------------------------------
     # UI 构建：自上而下与主窗口 body 结构一致
@@ -328,13 +343,45 @@ class PropertiesPage(QWidget):
         return box
 
     def _build_regions_box(self) -> QGroupBox:
-        """占位：区域与子卷信息将在后续版本接入真实数据。"""
-        box = QGroupBox("区域列表（后续设计）")
+        """根级 ``Regions``：名称可编辑，尺寸与相对位置只读（设计文档 §2.3.4）。"""
+        box = QGroupBox("区域列表")
         lay = QVBoxLayout(box)
-        self._regions_list = QListWidget()
-        self._regions_list.addItem("（暂无区域，后续接入真实数据）")
-        self._regions_list.setEnabled(False)
-        lay.addWidget(self._regions_list)
+        app = QApplication.instance()
+        _tid = current_theme_id(app) if app is not None else "QTDefault"
+        self._regions_table = ThemedPlainQTableWidget(theme_id=_tid)
+        self._regions_table.setColumnCount(7)
+        self._regions_table.setHorizontalHeaderLabels(
+            [
+                "区域名称",
+                "尺寸 x",
+                "尺寸 y",
+                "尺寸 z",
+                "位置 x",
+                "位置 y",
+                "位置 z",
+            ]
+        )
+        name_header = self._regions_table.horizontalHeaderItem(0)
+        if name_header is not None:
+            name_header.setToolTip("双击该列单元格可修改区域名称；也可选中行后按 F2 进入编辑。")
+        self._regions_table.verticalHeader().setVisible(False)
+        self._regions_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._regions_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.SelectedClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+        )
+        rh = self._regions_table.horizontalHeader()
+        rh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for col in range(1, 7):
+            rh.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        self._regions_table.setMinimumHeight(180)
+        self._regions_table.itemChanged.connect(self._on_regions_item_changed)
+        lay.addWidget(self._regions_table)
+        self._regions_empty_hint = QLabel("当前文件无子区域，或 Regions 无法解析。")
+        self._regions_empty_hint.setStyleSheet("color: palette(mid);")
+        self._regions_empty_hint.setWordWrap(True)
+        lay.addWidget(self._regions_empty_hint)
         return box
 
     def _build_footer_row(self) -> QHBoxLayout:
@@ -377,6 +424,49 @@ class PropertiesPage(QWidget):
         self._internal_name_edit.textChanged.connect(self._mark_dirty)
         self._author_edit.textChanged.connect(self._mark_dirty)
         self._description_edit.textChanged.connect(self._mark_dirty)
+
+    def _on_regions_item_changed(self, item: QTableWidgetItem) -> None:
+        """仅「区域名称」列（第 0 列）的编辑触发脏标记。"""
+        if item.column() != 0:
+            return
+        self._mark_dirty()
+
+    def _apply_regions_table(self, data: SnbtProperties) -> None:
+        """用模型填充区域表；在 ``_loading`` 为 True 时调用可避免触发 ``itemChanged`` 脏标记。"""
+        self._regions_table.blockSignals(True)
+        self._regions_table.setRowCount(0)
+        ro = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        editable = ro | Qt.ItemFlag.ItemIsEditable
+        for ri, reg in enumerate(data.regions):
+            self._regions_table.insertRow(ri)
+            name_item = QTableWidgetItem(reg.name)
+            name_item.setFlags(editable)
+            self._regions_table.setItem(ri, 0, name_item)
+            vals = (*reg.size, *reg.position)
+            for ci, val in enumerate(vals, start=1):
+                cell = QTableWidgetItem(str(val))
+                cell.setFlags(ro)
+                self._regions_table.setItem(ri, ci, cell)
+        self._regions_table.blockSignals(False)
+        self._regions_empty_hint.setVisible(len(data.regions) == 0)
+        self._regions_table.sync_row_heights()
+
+    def _collect_regions_from_table(self) -> list[RegionInfo]:
+        """行序与 ``_current_data.regions`` 对齐；只从第 0 列读取新名称，几何字段沿用模型。"""
+        rows = self._regions_table.rowCount()
+        base = self._current_data.regions
+        if rows == 0:
+            return []
+        out: list[RegionInfo] = []
+        for i in range(rows):
+            name_item = self._regions_table.item(i, 0)
+            name = name_item.text().strip() if name_item is not None else ""
+            if i < len(base):
+                b = base[i]
+                out.append(RegionInfo(source_key=b.source_key, name=name, size=b.size, position=b.position))
+            else:
+                out.append(RegionInfo(source_key=name, name=name, size=(0, 0, 0), position=(0, 0, 0)))
+        return out
 
     # -------------------------------------------------------------------------
     # 槽函数：文件选择、预览、保存
@@ -472,7 +562,7 @@ class PropertiesPage(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", f"写入 SNBT 失败：\n{exc}")
             return
-        self._current_data = model
+        self._current_data = regions_after_save_commit(model)
         self._dirty = False
         self._sync_title_hint()
         QMessageBox.information(self, "保存", "已保存到原文件。")
@@ -535,6 +625,7 @@ class PropertiesPage(QWidget):
         self._litematica_ver_readonly.setText(str(data.litematic_version))
         self._mc_data_ver_readonly.setText(str(data.minecraft_data_version))
         self._set_preview_from_argb_list(data.preview_image_data)
+        self._apply_regions_table(data)
         self._sync_title_hint()
 
     def _apply_line_edit_horizontal_shrink(self) -> None:
@@ -587,6 +678,7 @@ class PropertiesPage(QWidget):
             litematic_version=self._current_data.litematic_version,
             minecraft_data_version=self._current_data.minecraft_data_version,
             preview_image_data=self._preview_to_argb_list(),
+            regions=self._collect_regions_from_table(),
         )
         return model
 

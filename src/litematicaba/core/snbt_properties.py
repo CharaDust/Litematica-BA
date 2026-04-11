@@ -2,6 +2,7 @@
 
 通过 amulet_nbt 读写压缩 NBT，与属性页 ``PropertiesPage`` 使用的 ``SnbtProperties`` 对齐。
 当前保存路径会改写：``Metadata.Name`` / ``Author`` / ``Description`` / ``PreviewImageData`` / ``TimeModified``；
+若 ``SnbtProperties.regions`` 非空，还会按属性页表格顺序与名称重写根级 ``Regions``（仅重命名子复合键，子树内容保持引用不变）。
 其余键保持文件原有内容（如 ``TotalBlocks``、``EnclosingSize`` 等由游戏或其它工具维护）。
 """
 
@@ -9,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 def _to_int(value, default: int = 0) -> int:
     try:
@@ -42,6 +44,20 @@ def _to_int32_signed(value: int) -> int:
 
 
 @dataclass(slots=True)
+class RegionInfo:
+    """根级 ``Regions`` 下的一个子区域在 UI 中的行。
+
+    ``source_key``：最近一次自磁盘成功加载时该子复合在 NBT 中的键名，用于保存时定位子树；
+    ``name``：当前显示名及保存目标键名（用户可编辑）。
+    """
+
+    source_key: str
+    name: str
+    size: tuple[int, int, int] = (0, 0, 0)
+    position: tuple[int, int, int] = (0, 0, 0)
+
+
+@dataclass(slots=True)
 class SnbtProperties:
     file_path: Path | None = None
     # 加载时设为 path.name；UI「文件名称」编辑框绑定此字段，另存为默认名等使用，**非** SNBT 中的 Name
@@ -58,30 +74,123 @@ class SnbtProperties:
     litematic_version: int = 0
     minecraft_data_version: int = 0
     preview_image_data: list[int] = field(default_factory=list)
+    regions: list[RegionInfo] = field(default_factory=list)
 
 
 def copy_snbt_properties(data: SnbtProperties) -> SnbtProperties:
     """返回 ``SnbtProperties`` 的独立副本。
 
     ``preview_image_data`` 必须 ``list(...)`` 复制，否则快照与当前编辑会共享同一列表引用；
-    其它字段为不可变或标量，浅拷贝 ``replace`` 即可。用于「恢复默认值」基线与 ``_current_data`` 分离。
+    ``regions`` 逐行复制为新的 ``RegionInfo``；其余字段为不可变或标量，浅拷贝 ``replace`` 即可。
+    用于「恢复默认值」基线与 ``_current_data`` 分离。
     """
-    return replace(data, preview_image_data=list(data.preview_image_data))
+    return replace(
+        data,
+        preview_image_data=list(data.preview_image_data),
+        regions=[RegionInfo(r.source_key, r.name, r.size, r.position) for r in data.regions],
+    )
 
 
 def _import_amulet_nbt():
     try:
-        from amulet_nbt import IntArrayTag, IntTag, LongTag, NamedTag, StringTag, load
+        from amulet_nbt import (
+            CompoundTag,
+            IntArrayTag,
+            IntTag,
+            LongTag,
+            NamedTag,
+            StringTag,
+            load,
+        )
     except Exception as exc:
         raise RuntimeError(
             "缺少依赖 amulet_nbt，请先安装 requirements.txt 后再使用 SNBT 读写。"
         ) from exc
-    return IntArrayTag, IntTag, LongTag, NamedTag, StringTag, load
+    return CompoundTag, IntArrayTag, IntTag, LongTag, NamedTag, StringTag, load
+
+
+def _read_xyz_compound(comp: Any) -> tuple[int, int, int]:
+    if comp is None:
+        return (0, 0, 0)
+    try:
+        return (
+            _to_int(comp.get("x"), 0),
+            _to_int(comp.get("y"), 0),
+            _to_int(comp.get("z"), 0),
+        )
+    except Exception:
+        return (0, 0, 0)
+
+
+def _parse_regions_list(root: Any) -> list[RegionInfo]:
+    """从根标签读取 ``Regions``，顺序为 NBT 复合中的键迭代顺序（amulet 与 Python 3.7+ 通常稳定）。"""
+    regions_tag = root.get("Regions")
+    if regions_tag is None:
+        return []
+    try:
+        keys = list(regions_tag.keys())
+    except Exception:
+        return []
+    out: list[RegionInfo] = []
+    for key in keys:
+        key_str = _to_str(key, str(key))
+        sub = regions_tag.get(key)
+        if sub is None:
+            continue
+        size_c = sub.get("Size")
+        if size_c is None:
+            size_c = sub.get("size")
+        pos_c = sub.get("Position")
+        if pos_c is None:
+            pos_c = sub.get("position")
+        sz = _read_xyz_compound(size_c)
+        pos = _read_xyz_compound(pos_c)
+        out.append(RegionInfo(source_key=key_str, name=key_str, size=sz, position=pos))
+    return out
+
+
+def regions_after_save_commit(data: SnbtProperties) -> SnbtProperties:
+    """保存成功后把 ``source_key`` 与 ``name`` 对齐，便于同一会话内再次保存。"""
+    fixed = [
+        RegionInfo(
+            source_key=r.name.strip(),
+            name=r.name.strip(),
+            size=r.size,
+            position=r.position,
+        )
+        for r in data.regions
+    ]
+    return replace(data, regions=fixed)
+
+
+def _apply_region_renames(root: Any, regions: list[RegionInfo], CompoundTag: Any) -> None:
+    if not regions:
+        return
+    regions_tag = root.get("Regions")
+    if regions_tag is None:
+        raise ValueError("文件中缺少 Regions 复合标签，无法写回区域名称。")
+    names = [r.name.strip() for r in regions]
+    if any(not n for n in names):
+        raise ValueError("区域名称不能为空。")
+    if len(set(names)) != len(names):
+        raise ValueError("区域名称不能重复。")
+    extracted: list[Any] = []
+    for r in regions:
+        sk = r.source_key
+        if sk not in regions_tag:
+            raise ValueError(
+                f"找不到区域「{sk}」，文件可能已在外部被修改，请重新打开后再试。"
+            )
+        extracted.append(regions_tag[sk])
+    new_compound = CompoundTag()
+    for name, tag in zip(names, extracted):
+        new_compound[name] = tag
+    root["Regions"] = new_compound
 
 
 def load_snbt_properties(file_path: str | Path) -> SnbtProperties:
     """读取 .litematic，抽出 ``Metadata`` 与根级 ``Version`` 等到 ``SnbtProperties``。"""
-    _, _, _, NamedTag, _, load = _import_amulet_nbt()
+    _, _, _, _, NamedTag, _, load = _import_amulet_nbt()
     path = Path(file_path)
     nbt: NamedTag = load(str(path), compressed=True)
     root = nbt.tag
@@ -118,13 +227,14 @@ def load_snbt_properties(file_path: str | Path) -> SnbtProperties:
         litematic_version=_to_int(root.get("Version"), 0),
         minecraft_data_version=mc_data_ver,
         preview_image_data=preview_data,
+        regions=_parse_regions_list(root),
     )
     return props
 
 
 def save_snbt_properties(data: SnbtProperties, output_path: str | Path | None = None) -> Path:
     """从 ``data.file_path`` 读入完整 NBT，覆写可编辑 Metadata 字段后写入 ``output_path``（默认原路径）。"""
-    IntArrayTag, IntTag, LongTag, NamedTag, StringTag, load = _import_amulet_nbt()
+    CompoundTag, IntArrayTag, IntTag, LongTag, NamedTag, StringTag, load = _import_amulet_nbt()
     if data.file_path is None:
         raise ValueError("file_path is empty, cannot save.")
     src = Path(data.file_path)
@@ -146,6 +256,8 @@ def save_snbt_properties(data: SnbtProperties, output_path: str | Path | None = 
         metadata["TimeModified"] = LongTag(int(data.modified_unix))
     else:
         metadata["TimeModified"] = IntTag(int(data.modified_unix))
+
+    _apply_region_renames(root, data.regions, CompoundTag)
 
     nbt.save_to(str(dst), compressed=True)
     return dst
