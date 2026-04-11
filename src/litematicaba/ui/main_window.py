@@ -64,8 +64,9 @@ class MainWindow(QWidget):
         self._stack.addWidget(self._properties_page)
         self._statistics_page = StatisticsPage(self._properties_page)
         self._stack.addWidget(self._statistics_page)
-        self._stack.addWidget(FlakePage())
-        self._stack.addWidget(RenderPage())
+        self._stack.addWidget(FlakePage(self._properties_page))
+        self._render_page = RenderPage(self._properties_page)
+        self._stack.addWidget(self._render_page)
         self._stack.addWidget(ReplacePage())
         self._ui_test_page = UiTestPage(
             show_tile_grid=self._settings.show_tile_grid,

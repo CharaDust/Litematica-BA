@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LitematicaBA Deepslate</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #2a2d34; overflow: hidden; }
+    #c { display: block; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <script src="https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/gl-matrix-min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/deepslate@0.25.1/dist/deepslate.umd.cjs"></script>
+  <script>
+(function () {
+  const canvas = document.getElementById("c");
+  const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false, antialias: true });
+  if (!gl) {
+    document.body.textContent = "WebGL 不可用";
+    return;
+  }
+  const DS = window.deepslate;
+  if (!DS || !DS.VoxelRenderer) {
+    document.body.textContent = "Deepslate 未加载（请检查网络或 CDN）";
+    return;
+  }
+  const { mat4 } = glMatrix;
+  const voxelRenderer = new DS.VoxelRenderer(gl);
+  let angle = 0;
+  let camDist = 64;
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+    const h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    voxelRenderer.setViewport(0, 0, canvas.width, canvas.height);
+  }
+
+  window.addEventListener("resize", resize);
+
+  function tick() {
+    angle += 0.007;
+    resize();
+    const view = mat4.create();
+    const d = camDist;
+    mat4.lookAt(
+      view,
+      [Math.cos(angle) * d, d * 0.52, Math.sin(angle) * d],
+      [0, 0, 0],
+      [0, 1, 0],
+    );
+    voxelRenderer.draw(view);
+    requestAnimationFrame(tick);
+  }
+
+  window.lbaLoadVoxelsB64 = function (b64) {
+    try {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const json = new TextDecoder().decode(bytes);
+      const data = JSON.parse(json);
+      if (typeof data.camDist === "number" && data.camDist > 1) {
+        camDist = data.camDist;
+      }
+      const list = Array.isArray(data.voxels) ? data.voxels : [];
+      const normalized = [];
+      for (let i = 0; i < list.length; i++) {
+        const v = list[i];
+        if (!v || typeof v.x !== "number" || typeof v.y !== "number" || typeof v.z !== "number") continue;
+        let c = v.color;
+        if (!c || c.length < 3) c = [128, 128, 128];
+        normalized.push({ x: v.x, y: v.y, z: v.z, color: [c[0], c[1], c[2]] });
+      }
+      voxelRenderer.setVoxels(normalized);
+    } catch (e) {
+      console.error(e);
+      voxelRenderer.setVoxels([]);
+    }
+  };
+
+  resize();
+  requestAnimationFrame(tick);
+})();
+  </script>
+</body>
+</html>
