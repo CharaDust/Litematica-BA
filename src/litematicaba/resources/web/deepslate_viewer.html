@@ -32,6 +32,10 @@
   window.lbaSetInvertY = function (v) {
     window.__lbaInvertY = !!v;
   };
+  window.__lbaCameraFov = 70;
+  window.lbaSetCameraFov = function (deg) {
+    window.__lbaCameraFov = Math.max(0, Math.min(110, deg | 0));
+  };
 })();
   </script>
   <script src="vendor/gl-matrix-min.js"></script>
@@ -53,6 +57,20 @@
   }
   const { mat4, vec3 } = glMatrix;
   const voxelRenderer = new DS.VoxelRenderer(gl);
+  voxelRenderer.getPerspective = function () {
+    const aspect = this.gl.canvas.clientWidth / this.gl.canvas.clientHeight;
+    const out = mat4.create();
+    const fov = window.__lbaCameraFov | 0;
+    if (fov <= 0) {
+      const halfH = Math.max(camDist * 0.38, 2.5);
+      const halfW = halfH * aspect;
+      mat4.ortho(out, -halfW, halfW, -halfH, halfH, 0.1, 500);
+    } else {
+      const rad = Math.max(1, Math.min(110, fov)) * Math.PI / 180;
+      mat4.perspective(out, rad, aspect, 0.1, 500);
+    }
+    return out;
+  };
 
   let camDist = 64;
   /** 观察目标（世界坐标），右键拖动平移 */

@@ -39,6 +39,8 @@ class AppSettings:
     deepslate_check_updates_on_startup: bool = False
     # 3D 轨道：纵向拖拽符号；勾选后适合与鼠标默认相反的触摸屏习惯
     deepslate_invert_y: bool = False
+    # vscode-nbt 同源 3D：在画布上叠加 cPos / cRot / cDist 等相机原始数据
+    nbt_viewer_camera_debug: bool = False
     # NBT 3D 预览当前应用的 MC 数据资源版本 id（如 1.21.4），对应 user_data/.../nbt-viewer/<id>/mcmeta/
     nbt_mcmeta_target_version: str = ""
 
@@ -54,6 +56,7 @@ class AppSettings:
             perf_test_overlay=bool(self.perf_test_overlay),
             deepslate_check_updates_on_startup=bool(self.deepslate_check_updates_on_startup),
             deepslate_invert_y=bool(self.deepslate_invert_y),
+            nbt_viewer_camera_debug=bool(self.nbt_viewer_camera_debug),
             nbt_mcmeta_target_version=str(self.nbt_mcmeta_target_version or "").strip()[:64],
         )
 
@@ -80,6 +83,7 @@ def load_settings() -> AppSettings:
         perf_test_overlay=bool(raw.get("perf_test_overlay", False)),
         deepslate_check_updates_on_startup=bool(raw.get("deepslate_check_updates_on_startup", False)),
         deepslate_invert_y=bool(raw.get("deepslate_invert_y", False)),
+        nbt_viewer_camera_debug=bool(raw.get("nbt_viewer_camera_debug", False)),
         nbt_mcmeta_target_version=str(raw.get("nbt_mcmeta_target_version", "") or ""),
     ).normalized()
 

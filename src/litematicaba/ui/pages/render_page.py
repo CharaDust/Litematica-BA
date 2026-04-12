@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSlider,
     QStyle,
     QStyleOptionButton,
     QVBoxLayout,
@@ -48,6 +49,10 @@ if _HAS_WEBENGINE and QWebEngineView is not None:
 
     class _DeepslateWebEngineView(QWebEngineView):
         """避免 QWebEngineView 的 sizeHint/minimumSizeHint 抬高主窗口最小高度。"""
+
+        def __init__(self, parent: QWidget | None = None) -> None:
+            super().__init__(parent)
+            self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 
         def minimumSizeHint(self) -> QSize:  # type: ignore[override]
             return QSize(0, 0)
@@ -102,6 +107,16 @@ _EMPTY_VOXELS_B64 = base64.b64encode(
 ).decode("ascii")
 
 
+def _effective_camera_fov_for_slider(raw: int) -> int:
+    """磁吸：刻度 1–14 视为 0°，15–29 视为 30°；其它为实际值。"""
+    r = int(raw)
+    if 1 <= r <= 14:
+        return 0
+    if 15 <= r <= 29:
+        return 30
+    return r
+
+
 class _VoxelPayloadThread(QThread):
     result_ready = Signal(object, str)  # dict | None, err
 
@@ -154,6 +169,9 @@ class RenderPage(QWidget):
         self._props = properties_page
         self._deepslate_invert_y: bool = (
             bool(app_settings.deepslate_invert_y) if app_settings is not None else False
+        )
+        self._nbt_camera_debug: bool = (
+            bool(app_settings.nbt_viewer_camera_debug) if app_settings is not None else False
         )
         self._nbt_applied_mcmeta_version = ""
         if app_settings is not None:
@@ -216,6 +234,22 @@ class RenderPage(QWidget):
         dir_center_row.addWidget(grid_host, 0, Qt.AlignmentFlag.AlignHCenter)
         dir_center_row.addStretch(1)
         dir_outer.addLayout(dir_center_row)
+
+        fov_row = QHBoxLayout()
+        fov_row.addWidget(QLabel("视角 FOV（0°=正交）"))
+        self._fov_slider = QSlider(Qt.Orientation.Horizontal)
+        self._fov_slider.setRange(0, 110)
+        self._fov_slider.setValue(70)
+        self._fov_slider.setTracking(True)
+        self._fov_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._fov_slider.setTickInterval(10)
+        self._fov_slider.valueChanged.connect(self._on_fov_slider_changed)
+        self._fov_slider.sliderReleased.connect(self._on_fov_slider_released)
+        self._fov_value_label = QLabel("70")
+        self._fov_value_label.setMinimumWidth(32)
+        fov_row.addWidget(self._fov_slider, 1)
+        fov_row.addWidget(self._fov_value_label)
+        dir_outer.addLayout(fov_row)
 
         self._btn_refresh = QPushButton("重新加载 3D")
         self._btn_refresh.clicked.connect(self._on_refresh_clicked)
@@ -303,7 +337,10 @@ class RenderPage(QWidget):
             self._nbt_applied_mcmeta_version = nv
             self._on_refresh_clicked()
             return
-        if not self._use_nbt_viewer:
+        self._nbt_camera_debug = bool(s.nbt_viewer_camera_debug)
+        if self._use_nbt_viewer:
+            self._push_nbt_camera_debug()
+        else:
             self._push_invert_y_to_webview()
 
     def _push_invert_y_to_webview(self) -> None:
@@ -311,6 +348,19 @@ class RenderPage(QWidget):
             return
         lit = "true" if self._deepslate_invert_y else "false"
         self._view.page().runJavaScript(f"window.lbaSetInvertY({lit});")
+
+    def _prime_nbt_camera_debug_global(self) -> None:
+        """在注入 NBT 之前写入全局标志，供 StructureEditor.reveal 读取（避免仅依赖 JS 队列顺序）。"""
+        if self._view is None or not self._viewer_ready or not self._use_nbt_viewer:
+            return
+        on = "true" if self._nbt_camera_debug else "false"
+        self._view.page().runJavaScript(f"window.__lbaNbtCameraDebug = {on};")
+
+    def _push_nbt_camera_debug(self) -> None:
+        if self._view is None or not self._viewer_ready or not self._use_nbt_viewer:
+            return
+        on = "true" if self._nbt_camera_debug else "false"
+        self._view.page().runJavaScript(f"window.lbaSetNbtCameraDebug({on});")
 
     def _current_view_preset(self) -> int:
         btn = self._view_group.checkedButton()
@@ -328,6 +378,36 @@ class RenderPage(QWidget):
             return
         p = self._current_view_preset()
         self._view.page().runJavaScript(f"window.lbaSetViewPreset({p});")
+
+    def _on_fov_slider_changed(self, value: int) -> None:
+        eff = _effective_camera_fov_for_slider(value)
+        self._fov_value_label.setText(str(eff))
+        self._sync_camera_fov_js()
+
+    def _on_fov_slider_released(self) -> None:
+        raw = int(self._fov_slider.value())
+        if 1 <= raw <= 14:
+            self._fov_slider.blockSignals(True)
+            self._fov_slider.setValue(0)
+            self._fov_slider.blockSignals(False)
+            self._on_fov_slider_changed(0)
+        elif 15 <= raw <= 29:
+            self._fov_slider.blockSignals(True)
+            self._fov_slider.setValue(30)
+            self._fov_slider.blockSignals(False)
+            self._on_fov_slider_changed(30)
+
+    def _sync_camera_fov_js(self) -> None:
+        if self._view is None or not self._viewer_ready:
+            return
+        raw = int(self._fov_slider.value())
+        v = _effective_camera_fov_for_slider(raw)
+        # NBT：StructureEditor 在页面内 rAF 读取该全局并刷新；Deepslate：每帧 tick 读取
+        self._view.page().runJavaScript(f"window.__lbaCameraFov={v};")
+
+    def _deferred_sync_view_after_nbt_inject(self) -> None:
+        self._sync_view_preset_js()
+        self._sync_camera_fov_js()
 
     def _inject_b64(self, b64: str) -> None:
         if self._view is None or not self._viewer_ready:
@@ -383,7 +463,7 @@ class RenderPage(QWidget):
                 self._inject_nbt_default_tree()
             else:
                 self._inject_nbt_structure_b64(pending)
-            QTimer.singleShot(250, self._sync_view_preset_js)
+            QTimer.singleShot(250, self._deferred_sync_view_after_nbt_inject)
             return
         if self._pending_b64 is None:
             return
@@ -391,16 +471,21 @@ class RenderPage(QWidget):
         self._pending_b64 = None
         self._inject_b64(b64)
         self._sync_view_preset_js()
+        self._sync_camera_fov_js()
 
     def _on_view_load_finished(self, ok: bool) -> None:
         self._viewer_ready = bool(ok)
         if ok:
+            if self._use_nbt_viewer:
+                self._prime_nbt_camera_debug_global()
             self._try_inject_pending()
             if not self._use_nbt_viewer:
                 self._sync_view_preset_js()
+                self._sync_camera_fov_js()
                 self._push_invert_y_to_webview()
             else:
                 self._sync_view_preset_js()
+                self._sync_camera_fov_js()
                 if self._pending_nbt_b64 is None and self._props.active_file_path() is None:
                     self._inject_nbt_default_tree()
         elif self._view is not None:

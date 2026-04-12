@@ -110,6 +110,10 @@ class OptionsPage(QWidget):
         self._btn_nbt_fetch = QPushButton("管理游戏资源版本…")
         self._btn_nbt_fetch.clicked.connect(self._on_nbt_manage_clicked)
         form_nbt.addRow(self._btn_nbt_fetch)
+        self._nbt_viewer_camera_debug = QCheckBox(
+            "在 NBT 3D 预览中显示相机调试信息（cPos、cRot、与目标距离 cDist、结构尺寸等）"
+        )
+        form_nbt.addRow(self._nbt_viewer_camera_debug)
         self._nbt_mcmeta_last_choice = ""
 
         body_lay.addWidget(g_theme)
@@ -127,6 +131,7 @@ class OptionsPage(QWidget):
         self._tile_view_right_padding_px.valueChanged.connect(self._persist)
         self._deepslate_invert_y.toggled.connect(self._persist)
         self._deepslate_check_startup.toggled.connect(self._persist)
+        self._nbt_viewer_camera_debug.toggled.connect(self._persist)
 
         self._loading = False
 
@@ -142,6 +147,7 @@ class OptionsPage(QWidget):
         self._tile_view_right_padding_px.setValue(s.tile_view_right_padding_px)
         self._deepslate_invert_y.setChecked(s.deepslate_invert_y)
         self._deepslate_check_startup.setChecked(s.deepslate_check_updates_on_startup)
+        self._nbt_viewer_camera_debug.setChecked(s.nbt_viewer_camera_debug)
         self._nbt_mcmeta_last_choice = s.nbt_mcmeta_target_version
         self._refresh_nbt_mcmeta_status_label()
         self._loading = False
@@ -157,6 +163,7 @@ class OptionsPage(QWidget):
             perf_test_overlay=self._perf_test_overlay.isChecked(),
             deepslate_check_updates_on_startup=self._deepslate_check_startup.isChecked(),
             deepslate_invert_y=self._deepslate_invert_y.isChecked(),
+            nbt_viewer_camera_debug=self._nbt_viewer_camera_debug.isChecked(),
             nbt_mcmeta_target_version=self._nbt_mcmeta_last_choice.strip(),
         ).normalized()
 

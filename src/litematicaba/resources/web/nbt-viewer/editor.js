@@ -13797,10 +13797,21 @@ var nbtEditor = (function (exports) {
             this.projMatrix = this.getPerspective();
         }
         getPerspective() {
-            const fieldOfView = 70 * Math.PI / 180;
             const aspect = this.gl.canvas.clientWidth / this.gl.canvas.clientHeight;
             const projMatrix = create$2();
-            perspective(projMatrix, fieldOfView, aspect, 0.1, 500.0);
+            const fovDeg = typeof this.lbaFovDeg === 'number' ? this.lbaFovDeg : 70;
+            if (fovDeg <= 0) {
+                const halfH = typeof this.lbaOrthoHalfHeight === 'number' && this.lbaOrthoHalfHeight > 0
+                    ? this.lbaOrthoHalfHeight
+                    : 8;
+                const halfW = halfH * aspect;
+                ortho(projMatrix, -halfW, halfW, -halfH, halfH, 0.1, 500.0);
+            }
+            else {
+                const clamped = Math.max(1, Math.min(110, fovDeg));
+                const fieldOfView = clamped * Math.PI / 180;
+                perspective(projMatrix, fieldOfView, aspect, 0.1, 500.0);
+            }
             return projMatrix;
         }
         initialize() {
@@ -21313,6 +21324,9 @@ var nbtEditor = (function (exports) {
             warningButton.textContent = 'Continue';
             warningButton.addEventListener('click', () => {
                 this.warning.classList.remove('active');
+                if (this._cameraDebugEl) {
+                    this._cameraDebugEl = null;
+                }
                 this.root.innerHTML = '<div class="spinner"></div>';
                 setTimeout(() => {
                     this.buildStructure();
@@ -21324,6 +21338,9 @@ var nbtEditor = (function (exports) {
             this.cPos = create$1();
             this.cRot = fromValues(0.4, 0.6);
             this.cDist = 10;
+            this.cFovDeg = typeof window !== 'undefined' && typeof window.__lbaCameraFov === 'number'
+                ? Math.max(0, Math.min(110, window.__lbaCameraFov | 0))
+                : 70;
             this.gridActive = true;
             this.invisibleBlocksActive = false;
             this.selectedBlock = null;
@@ -21378,17 +21395,43 @@ var nbtEditor = (function (exports) {
                 if (this.resize())
                     this.render();
             });
+            this._cameraDebugEnabled = false;
+            this._cameraDebugEl = null;
+            this._renderFollowUp = false;
+            this._lbaFovRafId = null;
             this.render();
+        }
+        _lbaStartFovHostSync() {
+            this._lbaStopFovHostSync();
+            const step = () => {
+                this._lbaFovRafId = requestAnimationFrame(step);
+                if (typeof window === 'undefined' || typeof window.__lbaCameraFov !== 'number') {
+                    return;
+                }
+                const nv = Math.max(0, Math.min(110, window.__lbaCameraFov | 0));
+                if (nv !== this.cFovDeg) {
+                    this.cFovDeg = nv;
+                    this.render();
+                }
+            };
+            this._lbaFovRafId = requestAnimationFrame(step);
+        }
+        _lbaStopFovHostSync() {
+            if (this._lbaFovRafId != null) {
+                cancelAnimationFrame(this._lbaFovRafId);
+                this._lbaFovRafId = null;
+            }
         }
         render() {
             if (this.renderRequested) {
+                /* FOV 滑块等外部高频调用会在同一帧内多次触发 render；补排队一帧以使用最新的 cFovDeg。 */
+                this._renderFollowUp = true;
                 return;
             }
             const requestTime = performance.now();
             this.renderRequested = true;
             requestAnimationFrame((time) => {
                 const delta = Math.max(0, time - requestTime);
-                this.renderRequested = false;
                 this.resize();
                 if (this.movement.some(m => m)) {
                     rotateY(this.cPos, this.cPos, [0, 0, 0], this.cRot[0]);
@@ -21409,37 +21452,118 @@ var nbtEditor = (function (exports) {
                 if (this.selectedBlock) {
                     this.renderer.drawOutline(viewMatrix, this.selectedBlock);
                 }
+                if (this._cameraDebugEnabled) {
+                    this._updateCameraDebugOverlay();
+                }
+                this.renderRequested = false;
+                if (this._renderFollowUp) {
+                    this._renderFollowUp = false;
+                    this.render();
+                }
             });
         }
         resize() {
+            const orthoH = Math.max(this.cDist * 0.38, 2.5);
+            this.renderer2.lbaFovDeg = this.cFovDeg;
+            this.renderer2.lbaOrthoHalfHeight = orthoH;
+            this.renderer.lbaFovDeg = this.cFovDeg;
+            this.renderer.lbaOrthoHalfHeight = orthoH;
+            let changed = false;
             const displayWidth2 = this.canvas2.clientWidth;
             const displayHeight2 = this.canvas2.clientHeight;
             if (this.canvas2.width !== displayWidth2 || this.canvas2.height !== displayHeight2) {
                 this.canvas2.width = displayWidth2;
                 this.canvas2.height = displayHeight2;
-                this.renderer2.setViewport(0, 0, this.canvas2.width, this.canvas2.height);
+                changed = true;
             }
             const displayWidth = this.canvas.clientWidth;
             const displayHeight = this.canvas.clientHeight;
             if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
                 this.canvas.width = displayWidth;
                 this.canvas.height = displayHeight;
-                this.renderer.setViewport(0, 0, this.canvas.width, this.canvas.height);
-                return true;
+                changed = true;
             }
-            return false;
+            if (this.canvas2.width > 0 && this.canvas2.height > 0) {
+                this.renderer2.setViewport(0, 0, this.canvas2.width, this.canvas2.height);
+            }
+            if (this.canvas.width > 0 && this.canvas.height > 0) {
+                this.renderer.setViewport(0, 0, this.canvas.width, this.canvas.height);
+            }
+            return changed;
         }
         reveal() {
+            if (typeof window !== 'undefined' && typeof window.__lbaCameraFov === 'number') {
+                this.cFovDeg = Math.max(0, Math.min(110, window.__lbaCameraFov | 0));
+            }
             this.root.append(this.warning);
             this.root.append(this.canvas);
             this.root.append(this.canvas2);
             this.showSidePanel();
             document.addEventListener('keydown', this.onKeyDown);
             document.addEventListener('keyup', this.onKeyUp);
+            if (typeof window !== 'undefined' && window.__lbaNbtCameraDebug) {
+                this.setCameraDebug(true);
+            }
+            this._lbaStartFovHostSync();
         }
         hide() {
+            this._lbaStopFovHostSync();
             document.removeEventListener('keydown', this.onKeyDown);
             document.removeEventListener('keyup', this.onKeyUp);
+        }
+        setCameraDebug(enabled) {
+            this._cameraDebugEnabled = !!enabled;
+            if (!this._cameraDebugEnabled) {
+                if (this._cameraDebugEl) {
+                    this._cameraDebugEl.remove();
+                    this._cameraDebugEl = null;
+                }
+                return;
+            }
+            if (this._cameraDebugEl && (!this._cameraDebugEl.isConnected || !this.root.contains(this._cameraDebugEl))) {
+                this._cameraDebugEl = null;
+            }
+            if (!this._cameraDebugEl && this.root) {
+                const el = document.createElement('pre');
+                el.className = 'lba-nbt-camera-debug';
+                el.style.cssText = 'position:absolute;bottom:8px;right:8px;top:auto;left:auto;margin:0;padding:8px 10px;font:12px/1.35 ui-monospace,Consolas,monospace;white-space:pre;z-index:50;pointer-events:none;background:rgba(0,0,0,0.72);color:#e0e0e0;border-radius:4px;border:1px solid rgba(255,255,255,0.12);max-width:min(420px,90vw);text-align:left;';
+                this._cameraDebugEl = el;
+                const rs = this.root.style.position;
+                if (!rs || rs === 'static') {
+                    this.root.style.position = 'relative';
+                }
+                this.root.appendChild(el);
+            }
+            this._updateCameraDebugOverlay();
+        }
+        _updateCameraDebugOverlay() {
+            if (!this._cameraDebugEnabled || !this._cameraDebugEl) {
+                return;
+            }
+            if (!this._cameraDebugEl.isConnected || !this.root.contains(this._cameraDebugEl)) {
+                this._cameraDebugEl = null;
+                if (typeof window !== 'undefined' && window.__lbaNbtCameraDebug) {
+                    this.setCameraDebug(true);
+                }
+                return;
+            }
+            const yaw = this.cRot[0];
+            const pitch = this.cRot[1];
+            const deg = (r) => r * 180 / Math.PI;
+            const fmt = (n) => Math.round(n * 1000) / 1000;
+            const sz = this.structure ? this.structure.getSize() : [0, 0, 0];
+            const fovLine = this.cFovDeg <= 0
+                ? 'FOV: 0°（正交投影）'
+                : `FOV: ${Math.round(this.cFovDeg)}°（透视）`;
+            this._cameraDebugEl.textContent = [
+                'NBT 3D 相机（StructureEditor）',
+                fovLine,
+                `cPos（视图矩阵平移项）: (${fmt(this.cPos[0])}, ${fmt(this.cPos[1])}, ${fmt(this.cPos[2])})`,
+                `cRot[0] yaw（绕 Y，弧度）: ${fmt(yaw)}  →  ${fmt(deg(yaw)).toFixed(2)}°`,
+                `cRot[1] pitch（绕 X，弧度）: ${fmt(pitch)}  →  ${fmt(deg(pitch)).toFixed(2)}°`,
+                `cDist（沿 -Z 后退距离）: ${fmt(this.cDist)}`,
+                `结构尺寸 getSize(): (${sz[0]}, ${sz[1]}, ${sz[2]})`,
+            ].join('\n');
         }
         onInit(file) {
             this.updateStructure(file);
@@ -22351,6 +22475,50 @@ var nbtEditor = (function (exports) {
     };
     window.lbaDispatchNbtViewerInit = (body) => {
         window.dispatchEvent(new MessageEvent('message', { data: { type: 'init', body } }));
+    };
+    if (typeof window.__lbaCameraFov !== 'number') {
+        window.__lbaCameraFov = 70;
+    }
+    window.lbaSetCameraFov = (deg) => {
+        const v = Math.max(0, Math.min(110, deg | 0));
+        window.__lbaCameraFov = v;
+        const ed = window.__lbaNbtEditor;
+        if (!ed || !ed.panels) {
+            return;
+        }
+        const key = ed.type === 'chunk' ? 'chunk' : ed.type === 'structure' ? 'structure' : null;
+        if (!key) {
+            return;
+        }
+        try {
+            const se = ed.panels[key].editor();
+            if (se && typeof se.render === 'function') {
+                se.cFovDeg = v;
+                se.render();
+            }
+        }
+        catch (_a) {
+        }
+    };
+    window.lbaSetNbtCameraDebug = (enabled) => {
+        const v = !!enabled;
+        window.__lbaNbtCameraDebug = v;
+        const ed = window.__lbaNbtEditor;
+        if (!ed || !ed.panels) {
+            return;
+        }
+        const key = ed.type === 'chunk' ? 'chunk' : ed.type === 'structure' ? 'structure' : null;
+        if (!key) {
+            return;
+        }
+        try {
+            const se = ed.panels[key].editor();
+            if (se && typeof se.setCameraDebug === 'function') {
+                se.setCameraDebug(v);
+            }
+        }
+        catch (_a) {
+        }
     };
     window.__lbaNbtEditor = new Editor();
 
