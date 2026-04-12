@@ -376,13 +376,16 @@ class RenderPage(QWidget):
         p = self._current_view_preset()
         self._view.page().runJavaScript(f"window.lbaSetViewPreset({p});")
 
-    def _on_reset_nbt_default_camera(self) -> None:
+    def _sync_nbt_default_camera_js(self) -> None:
         if self._view is None or not self._viewer_ready or not self._use_nbt_viewer:
             return
         self._view.page().runJavaScript(
             "(function(){try{if(typeof window.lbaResetNbtDefaultCamera==='function')"
             "window.lbaResetNbtDefaultCamera();}catch(e){console.error(e);}})();"
         )
+
+    def _on_reset_nbt_default_camera(self) -> None:
+        self._sync_nbt_default_camera_js()
 
     def _on_fov_slider_changed(self, value: int) -> None:
         eff = _effective_camera_fov_for_slider(value)
@@ -411,7 +414,8 @@ class RenderPage(QWidget):
         self._view.page().runJavaScript(f"window.__lbaCameraFov={v};")
 
     def _deferred_sync_view_after_nbt_inject(self) -> None:
-        self._sync_view_preset_js()
+        """NBT 注入后：轨道相机恢复为 StructureEditor 初始 cRot/cPos/cDist（与「恢复默认视角」一致）。"""
+        self._sync_nbt_default_camera_js()
         self._sync_camera_fov_js()
 
     def _inject_b64(self, b64: str) -> None:
@@ -456,43 +460,47 @@ class RenderPage(QWidget):
         )
         self._view.page().runJavaScript(js)
 
-    def _try_inject_pending(self) -> None:
+    def _try_inject_pending(self) -> bool:
         if self._view is None or not self._viewer_ready:
-            return
+            return False
         if self._use_nbt_viewer:
             if self._pending_nbt_b64 is None:
-                return
+                return False
             pending = self._pending_nbt_b64
             self._pending_nbt_b64 = None
+            self._last_view_preset = 0
             if pending == "":
                 self._inject_nbt_default_tree()
             else:
                 self._inject_nbt_structure_b64(pending)
             QTimer.singleShot(250, self._deferred_sync_view_after_nbt_inject)
-            return
+            return True
         if self._pending_b64 is None:
-            return
+            return False
         b64 = self._pending_b64
         self._pending_b64 = None
+        self._last_view_preset = 0
         self._inject_b64(b64)
         self._sync_view_preset_js()
         self._sync_camera_fov_js()
+        return True
 
     def _on_view_load_finished(self, ok: bool) -> None:
         self._viewer_ready = bool(ok)
         if ok:
             if self._use_nbt_viewer:
                 self._prime_nbt_camera_debug_global()
-            self._try_inject_pending()
+            injected = self._try_inject_pending()
             if not self._use_nbt_viewer:
+                self._last_view_preset = 0
                 self._sync_view_preset_js()
                 self._sync_camera_fov_js()
                 self._push_invert_y_to_webview()
             else:
-                self._sync_view_preset_js()
                 self._sync_camera_fov_js()
-                if self._pending_nbt_b64 is None and self._props.active_file_path() is None:
-                    self._inject_nbt_default_tree()
+                if not injected and self._props.active_file_path() is None:
+                    self._pending_nbt_b64 = ""
+                    self._try_inject_pending()
         elif self._view is not None:
             self._status.setText("本地 Web 视图加载失败（请确认 resources/web 下 HTML 与 vendor 脚本齐全）。")
 
