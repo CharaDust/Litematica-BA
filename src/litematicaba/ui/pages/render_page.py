@@ -9,7 +9,6 @@ from pathlib import Path
 from PySide6.QtCore import QThread, QTimer, QUrl, Qt, QSize, Signal
 from PySide6.QtGui import QImage, QShowEvent
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QComboBox,
     QFileDialog,
     QGridLayout,
@@ -212,25 +211,18 @@ class RenderPage(QWidget):
             if sp > 0:
                 grid.setHorizontalSpacing(sp)
                 grid.setVerticalSpacing(sp)
-        self._view_group = QButtonGroup(self)
-        self._view_group.setExclusive(True)
         side = _view_dir_button_square_side(self)
         self._view_dir_buttons: list[QPushButton] = []
+        self._last_view_preset = 0
         for row, col, preset_id, text, tip in _VIEW_GRID:
             btn = QPushButton(text)
-            btn.setCheckable(True)
-            btn.setProperty("view_preset", preset_id)
             btn.setToolTip(tip)
             btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             btn.setFixedSize(side, side)
-            self._view_group.addButton(btn)
+            pid = int(preset_id)
+            btn.clicked.connect(lambda _checked=False, p=pid: self._on_view_preset_button(p))
             self._view_dir_buttons.append(btn)
             grid.addWidget(btn, row, col)
-        for b in self._view_dir_buttons:
-            if int(b.property("view_preset")) == 0:
-                b.setChecked(True)
-                break
-        self._view_group.buttonClicked.connect(lambda _b: self._sync_view_preset_js())
         dir_center_row.addWidget(grid_host, 0, Qt.AlignmentFlag.AlignHCenter)
         dir_center_row.addStretch(1)
         dir_outer.addLayout(dir_center_row)
@@ -250,6 +242,14 @@ class RenderPage(QWidget):
         fov_row.addWidget(self._fov_slider, 1)
         fov_row.addWidget(self._fov_value_label)
         dir_outer.addLayout(fov_row)
+
+        self._btn_reset_camera = QPushButton("恢复默认视角")
+        self._btn_reset_camera.setToolTip(
+            "将 NBT 3D 相机恢复为加载后的默认 cRot、cPos、cDist（与 StructureEditor 初始轨道一致）"
+        )
+        self._btn_reset_camera.clicked.connect(self._on_reset_nbt_default_camera)
+        self._btn_reset_camera.setVisible(self._use_nbt_viewer)
+        dir_outer.addWidget(self._btn_reset_camera)
 
         self._btn_refresh = QPushButton("重新加载 3D")
         self._btn_refresh.clicked.connect(self._on_refresh_clicked)
@@ -317,6 +317,7 @@ class RenderPage(QWidget):
         if now_nbt != self._use_nbt_viewer:
             self._use_nbt_viewer = now_nbt
             self._region_strip.setVisible(not now_nbt)
+            self._btn_reset_camera.setVisible(now_nbt)
         self._nbt_html_path, self._nbt_viewer_mode = p, m
         if self._view is not None and _HAS_WEBENGINE:
             if now_nbt and p is not None and p.is_file():
@@ -363,21 +364,25 @@ class RenderPage(QWidget):
         self._view.page().runJavaScript(f"window.lbaSetNbtCameraDebug({on});")
 
     def _current_view_preset(self) -> int:
-        btn = self._view_group.checkedButton()
-        if btn is None:
-            return 0
-        raw = btn.property("view_preset")
-        try:
-            v = int(raw)
-        except (TypeError, ValueError):
-            return 0
-        return max(0, min(8, v))
+        return max(0, min(8, int(self._last_view_preset)))
+
+    def _on_view_preset_button(self, preset_id: int) -> None:
+        self._last_view_preset = max(0, min(8, int(preset_id)))
+        self._sync_view_preset_js()
 
     def _sync_view_preset_js(self) -> None:
         if self._view is None or not self._viewer_ready:
             return
         p = self._current_view_preset()
         self._view.page().runJavaScript(f"window.lbaSetViewPreset({p});")
+
+    def _on_reset_nbt_default_camera(self) -> None:
+        if self._view is None or not self._viewer_ready or not self._use_nbt_viewer:
+            return
+        self._view.page().runJavaScript(
+            "(function(){try{if(typeof window.lbaResetNbtDefaultCamera==='function')"
+            "window.lbaResetNbtDefaultCamera();}catch(e){console.error(e);}})();"
+        )
 
     def _on_fov_slider_changed(self, value: int) -> None:
         eff = _effective_camera_fov_for_slider(value)

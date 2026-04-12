@@ -73,6 +73,8 @@
   };
 
   let camDist = 64;
+  /** 体素包围盒各向尺寸（与 NBT getSize 语义一致），供四角对角预设用 */
+  window.__lbaVoxelBBoxSize = [1, 1, 1];
   /** 观察目标（世界坐标），右键拖动平移 */
   const pan = vec3.create();
   /** 轨道角：绕 Y 为 yaw，仰角为 pitch（弧度） */
@@ -103,9 +105,9 @@
       case 2:
         return normalize3(o, 0, dh, d);
       case 3:
-        return normalize3(o, -d, dh, 0);
-      case 4:
         return normalize3(o, d, dh, 0);
+      case 4:
+        return normalize3(o, -d, dh, 0);
       case 5:
         return normalize3(o, d * 0.82, d * 0.55, -d * 0.82);
       case 6:
@@ -117,8 +119,41 @@
     }
   }
 
+  function yawPitchDiagonalPreset(p, sx, sy, sz) {
+    const x = Math.max(sx, 1e-6);
+    const y = Math.max(sy, 1e-6);
+    const z = Math.max(sz, 1e-6);
+    const pitchDiag = Math.atan2(y, Math.hypot(x, z));
+    switch (p | 0) {
+      case 5:
+        return [Math.atan2(-x, -z), pitchDiag];
+      case 6:
+        return [Math.atan2(-x, z), pitchDiag];
+      case 7:
+        return [Math.atan2(x, z), pitchDiag];
+      case 8:
+        return [Math.atan2(x, -z), pitchDiag];
+      default:
+        return null;
+    }
+  }
+
   function syncFromPreset() {
-    const dir = presetDirection(window.__lbaViewPreset | 0);
+    const p = window.__lbaViewPreset | 0;
+    if (p >= 5 && p <= 8) {
+      const b = window.__lbaVoxelBBoxSize || [1, 1, 1];
+      const yp = yawPitchDiagonalPreset(p, b[0], b[1], b[2]);
+      if (yp) {
+        yaw = yp[0];
+        pitch = yp[1];
+        pan[0] = 0;
+        pan[1] = 0;
+        pan[2] = 0;
+        window.__lbaSyncViewFromPreset = false;
+        return;
+      }
+    }
+    const dir = presetDirection(p);
     pitch = Math.asin(Math.max(-1, Math.min(1, dir[1])));
     yaw = Math.atan2(dir[0], dir[2]);
     pan[0] = 0;
@@ -281,6 +316,30 @@
         if (!c || c.length < 3) c = [128, 128, 128];
         normalized.push({ x: v.x, y: v.y, z: v.z, color: [c[0], c[1], c[2]] });
       }
+      let bx = 1;
+      let by = 1;
+      let bz = 1;
+      if (normalized.length) {
+        let minX = normalized[0].x;
+        let maxX = normalized[0].x;
+        let minY = normalized[0].y;
+        let maxY = normalized[0].y;
+        let minZ = normalized[0].z;
+        let maxZ = normalized[0].z;
+        for (let j = 1; j < normalized.length; j++) {
+          const q = normalized[j];
+          if (q.x < minX) minX = q.x;
+          if (q.x > maxX) maxX = q.x;
+          if (q.y < minY) minY = q.y;
+          if (q.y > maxY) maxY = q.y;
+          if (q.z < minZ) minZ = q.z;
+          if (q.z > maxZ) maxZ = q.z;
+        }
+        bx = maxX - minX + 1;
+        by = maxY - minY + 1;
+        bz = maxZ - minZ + 1;
+      }
+      window.__lbaVoxelBBoxSize = [bx, by, bz];
       voxelRenderer.setVoxels(normalized);
     } catch (e) {
       console.error(e);
