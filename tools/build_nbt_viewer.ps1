@@ -4,6 +4,18 @@ $ErrorActionPreference = "Stop"
 $env:Path = "$env:ProgramFiles\nodejs;$env:Path"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location "$root\third_party\vscode-nbt"
+$patch = Join-Path $root "tools\patches\vscode-nbt-lba-editor.patch"
+if (Test-Path $patch) {
+	git apply --check $patch 2>$null
+	if ($LASTEXITCODE -eq 0) {
+		git apply $patch
+	} else {
+		git apply --reverse --check $patch 2>$null
+		if ($LASTEXITCODE -ne 0) {
+			Write-Error "无法应用或校验 LitematicaBA 的 vscode-nbt 补丁：$patch"
+		}
+	}
+}
 npm ci
 npx rollup --config
 $pkg = "$root\src\litematicaba\resources\web\nbt-viewer\editor.js"
