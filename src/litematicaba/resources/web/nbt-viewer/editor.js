@@ -13830,6 +13830,8 @@ var nbtEditor = (function (exports) {
             if (buffer === undefined)
                 throw new Error(`Expected buffer for ${name}`);
             const location = this.gl.getAttribLocation(this.activeShader, name);
+            if (location < 0)
+                return;
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
             this.gl.vertexAttribPointer(location, size, this.gl.FLOAT, false, 0, 0);
             this.gl.enableVertexAttribArray(location);
@@ -14760,7 +14762,7 @@ var nbtEditor = (function (exports) {
             this.setShader(this.colorShaderProgram);
             this.prepareDraw(viewMatrix);
             this.chunkBuilder.getMeshes().forEach(mesh => {
-                this.drawMesh(mesh, { pos: true, color: true, normal: true, blockPos: true });
+                this.drawMesh(mesh, { pos: true, blockPos: true });
             });
         }
         drawOutline(viewMatrix, pos) {
@@ -18787,6 +18789,10 @@ var nbtEditor = (function (exports) {
             Object.keys(models).forEach(id => {
                 this.blockModels[Identifier.create(id).toString()] = BlockModel.fromJson(models[id]);
             });
+            const builtinEntityId = Identifier.parse('minecraft:builtin/entity').toString();
+            if (!this.blockModels[builtinEntityId]) {
+                this.blockModels[builtinEntityId] = new BlockModel(undefined, undefined, undefined, undefined, undefined);
+            }
             Object.values(this.blockModels).forEach(m => m.flatten(this));
         }
         loadBlockAtlas(image, textures) {
@@ -22061,68 +22067,71 @@ var nbtEditor = (function (exports) {
                 this.onMessage(e.data);
             });
             this.findWidget = document.querySelector('.find-widget');
-            const findTypeSelect = this.findWidget.querySelector('.find-part > .type-select > select');
-            const findNameInput = this.findWidget.querySelector('.find-part > .name-input');
-            const findValueInput = this.findWidget.querySelector('.find-part > .value-input');
-            findTypeSelect.addEventListener('change', () => {
-                findTypeSelect.parentElement.setAttribute('data-icon', findTypeSelect.value);
-                this.doSearch();
-            });
-            this.findWidget.querySelectorAll('.type-select select').forEach(select => {
-                ['Any', ...TYPES].filter(e => e !== 'End').forEach(t => {
-                    const option = document.createElement('option');
-                    option.value = t;
-                    option.textContent = t.charAt(0).toUpperCase() + t.slice(1).split(/(?=[A-Z])/).join(' ');
-                    select.append(option);
-                });
-                select.parentElement.setAttribute('data-icon', 'Any');
-            });
-            (_a = this.findWidget.querySelector('.find-part')) === null || _a === void 0 ? void 0 : _a.addEventListener('keyup', evt => {
-                if (evt.key !== 'Enter') {
+            const fw = this.findWidget;
+            const findTypeSelect = fw === null || fw === void 0 ? void 0 : fw.querySelector('.find-part > .type-select > select');
+            const findNameInput = fw === null || fw === void 0 ? void 0 : fw.querySelector('.find-part > .name-input');
+            const findValueInput = fw === null || fw === void 0 ? void 0 : fw.querySelector('.find-part > .value-input');
+            if (findTypeSelect && findNameInput && findValueInput) {
+                findTypeSelect.addEventListener('change', () => {
+                    findTypeSelect.parentElement.setAttribute('data-icon', findTypeSelect.value);
                     this.doSearch();
-                }
-            });
-            (_b = this.findWidget.querySelector('.find-part')) === null || _b === void 0 ? void 0 : _b.addEventListener('keydown', evt => {
-                if (evt.key === 'Enter') {
-                    if (evt.shiftKey) {
-                        this.showMatch(this.searchIndex - 1);
+                });
+                fw.querySelectorAll('.type-select select').forEach(select => {
+                    ['Any', ...TYPES].filter(e => e !== 'End').forEach(t => {
+                        const option = document.createElement('option');
+                        option.value = t;
+                        option.textContent = t.charAt(0).toUpperCase() + t.slice(1).split(/(?=[A-Z])/).join(' ');
+                        select.append(option);
+                    });
+                    select.parentElement.setAttribute('data-icon', 'Any');
+                });
+                (_a = fw.querySelector('.find-part')) === null || _a === void 0 ? void 0 : _a.addEventListener('keyup', evt => {
+                    if (evt.key !== 'Enter') {
+                        this.doSearch();
                     }
-                    else {
-                        this.showMatch(this.searchIndex + 1);
+                });
+                (_b = fw.querySelector('.find-part')) === null || _b === void 0 ? void 0 : _b.addEventListener('keydown', evt => {
+                    if (evt.key === 'Enter') {
+                        if (evt.shiftKey) {
+                            this.showMatch(this.searchIndex - 1);
+                        }
+                        else {
+                            this.showMatch(this.searchIndex + 1);
+                        }
                     }
-                }
-            });
-            (_c = this.findWidget.querySelector('.previous-match')) === null || _c === void 0 ? void 0 : _c.addEventListener('click', () => {
-                this.showMatch(this.searchIndex - 1);
-            });
-            (_d = this.findWidget.querySelector('.next-match')) === null || _d === void 0 ? void 0 : _d.addEventListener('click', () => {
-                this.showMatch(this.searchIndex + 1);
-            });
-            (_e = this.findWidget.querySelector('.close-widget')) === null || _e === void 0 ? void 0 : _e.addEventListener('click', () => {
-                this.findWidget.classList.remove('visible');
-            });
-            (_f = this.findWidget.querySelector('.replace-part')) === null || _f === void 0 ? void 0 : _f.addEventListener('keydown', evt => {
-                if (evt.key === 'Enter') {
-                    if (evt.altKey && evt.ctrlKey) {
-                        this.doReplaceAll();
+                });
+                (_c = fw.querySelector('.previous-match')) === null || _c === void 0 ? void 0 : _c.addEventListener('click', () => {
+                    this.showMatch(this.searchIndex - 1);
+                });
+                (_d = fw.querySelector('.next-match')) === null || _d === void 0 ? void 0 : _d.addEventListener('click', () => {
+                    this.showMatch(this.searchIndex + 1);
+                });
+                (_e = fw.querySelector('.close-widget')) === null || _e === void 0 ? void 0 : _e.addEventListener('click', () => {
+                    fw.classList.remove('visible');
+                });
+                (_f = fw.querySelector('.replace-part')) === null || _f === void 0 ? void 0 : _f.addEventListener('keydown', evt => {
+                    if (evt.key === 'Enter') {
+                        if (evt.altKey && evt.ctrlKey) {
+                            this.doReplaceAll();
+                        }
+                        else {
+                            this.doReplace();
+                        }
                     }
-                    else {
-                        this.doReplace();
-                    }
-                }
-            });
-            const replaceExpand = this.findWidget.querySelector('.replace-expand');
-            replaceExpand === null || replaceExpand === void 0 ? void 0 : replaceExpand.addEventListener('click', () => {
-                const expanded = this.findWidget.classList.toggle('expanded');
-                replaceExpand === null || replaceExpand === void 0 ? void 0 : replaceExpand.classList.remove('codicon-chevron-right', 'codicon-chevron-down');
-                replaceExpand === null || replaceExpand === void 0 ? void 0 : replaceExpand.classList.add(expanded ? 'codicon-chevron-down' : 'codicon-chevron-right');
-            });
-            (_g = this.findWidget.querySelector('.replace')) === null || _g === void 0 ? void 0 : _g.addEventListener('click', () => {
-                this.doReplace();
-            });
-            (_h = this.findWidget.querySelector('.replace-all')) === null || _h === void 0 ? void 0 : _h.addEventListener('click', () => {
-                this.doReplaceAll();
-            });
+                });
+                const replaceExpand = fw.querySelector('.replace-expand');
+                replaceExpand === null || replaceExpand === void 0 ? void 0 : replaceExpand.addEventListener('click', () => {
+                    const expanded = fw.classList.toggle('expanded');
+                    replaceExpand === null || replaceExpand === void 0 ? void 0 : replaceExpand.classList.remove('codicon-chevron-right', 'codicon-chevron-down');
+                    replaceExpand === null || replaceExpand === void 0 ? void 0 : replaceExpand.classList.add(expanded ? 'codicon-chevron-down' : 'codicon-chevron-right');
+                });
+                (_g = fw.querySelector('.replace')) === null || _g === void 0 ? void 0 : _g.addEventListener('click', () => {
+                    this.doReplace();
+                });
+                (_h = fw.querySelector('.replace-all')) === null || _h === void 0 ? void 0 : _h.addEventListener('click', () => {
+                    this.doReplaceAll();
+                });
+            }
             (_j = document.querySelector('.region-menu .btn')) === null || _j === void 0 ? void 0 : _j.addEventListener('click', () => {
                 this.inMap = !this.inMap;
                 this.updateRegionMap();
@@ -22140,7 +22149,10 @@ var nbtEditor = (function (exports) {
             document.addEventListener('keydown', evt => {
                 var _a, _b;
                 if (evt.ctrlKey && (evt.code === 'KeyF' || evt.code === 'KeyH')) {
-                    this.findWidget.classList.add('visible');
+                    if (!findTypeSelect || !findNameInput || !findValueInput)
+                        return;
+                    const replaceExpand = fw === null || fw === void 0 ? void 0 : fw.querySelector('.replace-expand');
+                    fw.classList.add('visible');
                     if (this.searchQuery.name) {
                         findNameInput.focus();
                         findNameInput.setSelectionRange(0, findNameInput.value.length);
@@ -22149,7 +22161,7 @@ var nbtEditor = (function (exports) {
                         findValueInput.focus();
                         findValueInput.setSelectionRange(0, findValueInput.value.length);
                     }
-                    this.findWidget.classList.toggle('expanded', evt.code === 'KeyH');
+                    fw.classList.toggle('expanded', evt.code === 'KeyH');
                     replaceExpand === null || replaceExpand === void 0 ? void 0 : replaceExpand.classList.remove('codicon-chevron-right', 'codicon-chevron-down');
                     replaceExpand === null || replaceExpand === void 0 ? void 0 : replaceExpand.classList.add(evt.code === 'KeyH' ? 'codicon-chevron-down' : 'codicon-chevron-right');
                     if (this.searchResults && this.searchResults.length > 0) {
@@ -22378,7 +22390,10 @@ var nbtEditor = (function (exports) {
             this.setPanel(this.activePanel);
         }
         doSearch() {
-            const query = this.getQuery(this.findWidget.querySelector('.find-part'));
+            const findPart = this.findWidget === null || this.findWidget === void 0 ? void 0 : this.findWidget.querySelector('.find-part');
+            if (!findPart)
+                return;
+            const query = this.getQuery(findPart);
             if (['type', 'name', 'value'].every(e => { var _a; return ((_a = this.searchQuery) === null || _a === void 0 ? void 0 : _a[e]) === query[e]; })) {
                 return;
             }
@@ -22422,29 +22437,41 @@ var nbtEditor = (function (exports) {
             }
         }
         getQuery(element) {
-            const typeQuery = (element === null || element === void 0 ? void 0 : element.querySelector('.type-select > select')).value;
-            const nameQuery = (element === null || element === void 0 ? void 0 : element.querySelector('.name-input')).value;
-            const valueQuery = (element === null || element === void 0 ? void 0 : element.querySelector('.value-input')).value;
+            if (!element) {
+                return { type: undefined, name: undefined, value: undefined };
+            }
+            const typeEl = element.querySelector('.type-select > select');
+            const typeQuery = typeEl === null || typeEl === void 0 ? void 0 : typeEl.value;
+            const nameEl = element.querySelector('.name-input');
+            const nameQuery = nameEl === null || nameEl === void 0 ? void 0 : nameEl.value;
+            const valueEl = element.querySelector('.value-input');
+            const valueQuery = valueEl === null || valueEl === void 0 ? void 0 : valueEl.value;
             return {
-                type: typeQuery === 'Any' ? undefined : TYPES.indexOf(typeQuery),
+                type: !typeQuery || typeQuery === 'Any' ? undefined : TYPES.indexOf(typeQuery),
                 name: nameQuery || undefined,
                 value: valueQuery || undefined,
             };
         }
         showMatch(index) {
             var _a, _b;
+            const matchesEl = this.findWidget === null || this.findWidget === void 0 ? void 0 : this.findWidget.querySelector('.matches');
+            if (!matchesEl)
+                return;
             if (this.searchResults === null || this.searchResults.length === 0) {
-                this.findWidget.querySelector('.matches').textContent = 'No results';
+                matchesEl.textContent = 'No results';
                 (_b = (_a = this.getPanel()) === null || _a === void 0 ? void 0 : _a.onSearch) === null || _b === void 0 ? void 0 : _b.call(_a, null);
             }
             else {
                 const matches = this.searchResults.length;
                 this.searchIndex = (index % matches + matches) % matches;
-                this.findWidget.querySelector('.matches').textContent = `${this.searchIndex + 1} of ${matches}`;
+                matchesEl.textContent = `${this.searchIndex + 1} of ${matches}`;
                 this.searchResults[this.searchIndex].show();
             }
-            this.findWidget.classList.toggle('no-results', this.searchResults !== null && this.searchResults.length === 0);
-            this.findWidget.querySelectorAll('.previous-match, .next-match').forEach(e => e.classList.toggle('disabled', this.searchResults === null || this.searchResults.length === 0));
+            const fw = this.findWidget;
+            if (fw) {
+                fw.classList.toggle('no-results', this.searchResults !== null && this.searchResults.length === 0);
+                fw.querySelectorAll('.previous-match, .next-match').forEach(e => e.classList.toggle('disabled', this.searchResults === null || this.searchResults.length === 0));
+            }
         }
         makeEdit(edit) {
             if (this.readOnly)
