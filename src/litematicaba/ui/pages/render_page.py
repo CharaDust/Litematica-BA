@@ -155,7 +155,12 @@ class RenderPage(QWidget):
         self._deepslate_invert_y: bool = (
             bool(app_settings.deepslate_invert_y) if app_settings is not None else False
         )
-        self._nbt_html_path, self._nbt_viewer_mode = resolve_nbt_viewer_html_path()
+        self._nbt_applied_mcmeta_version = ""
+        if app_settings is not None:
+            self._nbt_applied_mcmeta_version = (app_settings.nbt_mcmeta_target_version or "").strip()
+        self._nbt_html_path, self._nbt_viewer_mode = resolve_nbt_viewer_html_path(
+            self._nbt_applied_mcmeta_version
+        )
         self._use_nbt_viewer: bool = bool(_HAS_WEBENGINE and self._nbt_html_path is not None)
         self._thread: _VoxelPayloadThread | None = None
         self._nbt_thread: _NbtRawFileThread | None = None
@@ -273,13 +278,13 @@ class RenderPage(QWidget):
 
     def _on_refresh_clicked(self) -> None:
         """重新解析 NBT 查看器入口（外部 data 或合并页），再加载当前投影。"""
+        p, m = resolve_nbt_viewer_html_path(self._nbt_applied_mcmeta_version)
+        now_nbt = bool(_HAS_WEBENGINE and p is not None)
+        if now_nbt != self._use_nbt_viewer:
+            self._use_nbt_viewer = now_nbt
+            self._region_strip.setVisible(not now_nbt)
+        self._nbt_html_path, self._nbt_viewer_mode = p, m
         if self._view is not None and _HAS_WEBENGINE:
-            p, m = resolve_nbt_viewer_html_path()
-            now_nbt = p is not None
-            if now_nbt != self._use_nbt_viewer:
-                self._use_nbt_viewer = now_nbt
-                self._region_strip.setVisible(not now_nbt)
-            self._nbt_html_path, self._nbt_viewer_mode = p, m
             if now_nbt and p is not None and p.is_file():
                 self._viewer_ready = False
                 self._view.load(QUrl.fromLocalFile(str(p.resolve())))
@@ -291,8 +296,13 @@ class RenderPage(QWidget):
         self._schedule_load()
 
     def apply_deepslate_settings(self, s: AppSettings) -> None:
-        """由主窗口在选项变更时调用，同步 WebView 内纵向拖拽符号。"""
+        """由主窗口在选项变更时调用：同步 mcmeta 应用版本与 Deepslate 纵向拖拽。"""
         self._deepslate_invert_y = bool(s.deepslate_invert_y)
+        nv = (s.nbt_mcmeta_target_version or "").strip()
+        if nv != self._nbt_applied_mcmeta_version:
+            self._nbt_applied_mcmeta_version = nv
+            self._on_refresh_clicked()
+            return
         if not self._use_nbt_viewer:
             self._push_invert_y_to_webview()
 
@@ -512,7 +522,12 @@ class RenderPage(QWidget):
             QMessageBox.warning(self, "NBT 预览", err)
             return
         self._pending_nbt_b64 = b64
-        ver_path = external_nbt_viewer_dir() / "mcmeta" / "version.txt"
+        base = external_nbt_viewer_dir()
+        v = self._nbt_applied_mcmeta_version.strip()
+        if v:
+            ver_path = base / v / "mcmeta" / "version.txt"
+        else:
+            ver_path = base / "mcmeta" / "version.txt"
         if not ver_path.is_file():
             ver_path = packaged_nbt_viewer_dir() / "mcmeta" / "version.txt"
         extra = ""

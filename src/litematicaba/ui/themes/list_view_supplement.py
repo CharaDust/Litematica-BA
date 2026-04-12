@@ -1,9 +1,40 @@
-"""为版本选择等对话框中的 QListWidget 追加与各主题一致的 QSS（主主题文件未覆盖 QAbstractItemView）。"""
+"""为版本管理等对话框中的 QTableWidget 追加与各主题一致的 QSS（主主题文件未覆盖 QAbstractItemView）。"""
 
 from __future__ import annotations
 
-# 仅作用于带 objectName 的对话框，避免污染其它列表控件。
-_SEL = "QDialog#McmetaVersionPickerDialog QListWidget#McmetaVersionPickerList"
+from litematicaba.core.settings import DEFAULT_THEME, VALID_THEMES
+
+# 仅作用于带 objectName 的对话框，避免污染其它表格控件。
+# 注意：QTableWidget 行高基本不受 QSS 的 ::item min-height 控制，须由对话框内 setDefaultSectionSize/setRowHeight 应用下列数值。
+_SEL = "QDialog#McmetaVersionPickerDialog QTableWidget#McmetaVersionTable"
+
+# 与 metro10.py / minecraft.py 中「列表行高」约定一致；仅列出的主题在资源管理表格中强制行高，其余保持 Qt 默认。
+MCMETA_TABLE_ROW_HEIGHT_PX_BY_THEME: dict[str, int] = {
+    "Metro10": 60,
+    "Minecraft": 44,
+}
+
+
+def mcmeta_version_table_list_row_height_px(theme_id: str) -> int | None:
+    tid = theme_id if theme_id in VALID_THEMES else DEFAULT_THEME
+    return MCMETA_TABLE_ROW_HEIGHT_PX_BY_THEME.get(tid)
+
+# 与各主题控件疏密一致：版本列表区域最小高度（像素），由对话框 setMinimumHeight 使用。
+MCMETA_TABLE_MIN_HEIGHT_PX_BY_THEME: dict[str, int] = {
+    "QTDefault": 300,
+    "Glass7": 320,
+    "Metro8": 288,
+    "Metro10": 304,
+    "Fluent11": 336,
+    "LightMac": 312,
+    "Bootstrap5": 324,
+    "Minecraft": 352,
+}
+
+
+def mcmeta_version_table_min_height_px(theme_id: str) -> int:
+    tid = theme_id if theme_id in VALID_THEMES else DEFAULT_THEME
+    return MCMETA_TABLE_MIN_HEIGHT_PX_BY_THEME.get(tid, MCMETA_TABLE_MIN_HEIGHT_PX_BY_THEME["QTDefault"])
 
 LIST_VIEW_QSS_BY_THEME: dict[str, str] = {
     "Fluent11": f"""
@@ -19,9 +50,6 @@ LIST_VIEW_QSS_BY_THEME: dict[str, str] = {
       background-color: #0067c0;
       color: #ffffff;
     }}
-    {_SEL}::item:hover:!selected {{
-      background-color: #f0f6fc;
-    }}
     """,
     "Glass7": f"""
     {_SEL} {{
@@ -35,9 +63,6 @@ LIST_VIEW_QSS_BY_THEME: dict[str, str] = {
     {_SEL}::item:selected {{
       background-color: rgba(0,114,198,0.9);
       color: #ffffff;
-    }}
-    {_SEL}::item:hover:!selected {{
-      background-color: rgba(255,255,255,0.9);
     }}
     """,
     "Metro8": f"""
@@ -53,25 +78,22 @@ LIST_VIEW_QSS_BY_THEME: dict[str, str] = {
       background-color: #0078d7;
       color: #ffffff;
     }}
-    {_SEL}::item:hover:!selected {{
-      background-color: #e5f3ff;
-    }}
     """,
     "Metro10": f"""
     {_SEL} {{
       border: 1px solid #c8c8c8;
       border-radius: 0;
       background-color: #ffffff;
-      alternate-background-color: #f5f5f5;
       padding: 2px;
       outline: none;
+    }}
+    {_SEL}::item {{
+      background-color: transparent;
+      border: none;
     }}
     {_SEL}::item:selected {{
       background-color: #0078d4;
       color: #ffffff;
-    }}
-    {_SEL}::item:hover:!selected {{
-      background-color: #e5f1fb;
     }}
     """,
     "Bootstrap5": f"""
@@ -87,9 +109,6 @@ LIST_VIEW_QSS_BY_THEME: dict[str, str] = {
       background-color: #0d6efd;
       color: #ffffff;
     }}
-    {_SEL}::item:hover:!selected {{
-      background-color: #e7f1ff;
-    }}
     """,
     "LightMac": f"""
     {_SEL} {{
@@ -103,9 +122,6 @@ LIST_VIEW_QSS_BY_THEME: dict[str, str] = {
     {_SEL}::item:selected {{
       background-color: #3d8ce0;
       color: #ffffff;
-    }}
-    {_SEL}::item:hover:!selected {{
-      background-color: #eaf3fc;
     }}
     """,
     "Minecraft": f"""
@@ -121,9 +137,6 @@ LIST_VIEW_QSS_BY_THEME: dict[str, str] = {
     {_SEL}::item:selected {{
       background-color: #5a922c;
       color: #ffffff;
-    }}
-    {_SEL}::item:hover:!selected {{
-      background-color: #3c3c3c;
     }}
     """,
 }

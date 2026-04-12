@@ -79,7 +79,6 @@ class MainWindow(QWidget):
         self._stack.addWidget(self._options_page)
         self._options_page.load(self._settings)
         self._options_page.settings_changed.connect(self._on_settings_changed)
-        self._options_page.nbt_game_assets_updated.connect(self._render_page._on_refresh_clicked)
         self._ui_test_page.apply_settings(self._settings)
 
         self._expand_btn = NavExpandButton()

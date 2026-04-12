@@ -12473,12 +12473,28 @@ var nbtEditor = (function (exports) {
             return mesh.transform(t);
         }
         getTexture(textureRef) {
-            textureRef = textureRef.startsWith('#') ? textureRef.slice(1) : textureRef;
-            textureRef = this.textures?.[textureRef] ?? '';
-            while (textureRef.startsWith('#')) {
-                textureRef = this.textures?.[textureRef.slice(1)] ?? '';
+            let cur = textureRef;
+            for (let depth = 0; depth < 32; depth++) {
+                if (cur == null) {
+                    return Identifier.parse('');
+                }
+                let s;
+                if (typeof cur === 'string') {
+                    s = cur;
+                }
+                else if (typeof cur === 'object' && typeof cur.sprite === 'string') {
+                    s = cur.sprite;
+                }
+                else {
+                    return Identifier.parse('');
+                }
+                if (s.startsWith('#')) {
+                    cur = this.textures?.[s.slice(1)];
+                    continue;
+                }
+                return Identifier.parse(s);
             }
-            return Identifier.parse(textureRef);
+            return Identifier.parse('');
         }
         flatten(accessor) {
             if (!this.parent) {

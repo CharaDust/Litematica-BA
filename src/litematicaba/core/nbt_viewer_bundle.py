@@ -3,7 +3,7 @@
 分层与更新约定见仓库 ``docs/nbt_viewer_storage.txt``。
 
 - **包内**：UI 壳（``editor.js``、``index.html``、``editor.css``、codicon），随 NBT Viewer 构建更新。
-- **用户数据**：``<user_data_dir>/minecraft-assets/nbt-viewer/mcmeta/`` 为游戏资源；选项页或 ``scripts/fetch_nbt_mcmeta_assets.py`` 更新。
+- **用户数据**：``<user_data_dir>/minecraft-assets/nbt-viewer/<MC 版本 id>/mcmeta/`` 为游戏资源（可多版本并存）；选项页或 ``scripts/fetch_nbt_mcmeta_assets.py`` 更新。未指定应用版本时仍尝试兼容旧版单层 ``nbt-viewer/mcmeta/``。
 - **合并模式（默认）**：包内 UI + 上述 ``mcmeta/`` → ``.cache/nbt_viewer_merged.html``。
 """
 
@@ -123,18 +123,45 @@ def write_merged_nbt_launcher(*, code_root: Path, external_mcmeta: Path) -> Path
     return out
 
 
-def resolve_nbt_viewer_html_path() -> tuple[Path | None, str]:
+def resolve_nbt_viewer_html_path(applied_mcmeta_version: str | None = None) -> tuple[Path | None, str]:
     """解析应加载的本地 HTML 路径与模式标签。
 
+    ``applied_mcmeta_version`` 为选项中「当前应用的 MC 版本 id」；空字符串则仅尝试旧版单层 ``mcmeta/`` 目录。
     返回 ``(path, mode)``，``mode`` 为 ``external`` | ``merged`` | ``none``。
-    包内不再携带 mcmeta；无 ``data/.../mcmeta`` 时返回 ``none``（须先运行 fetch 脚本）。
     """
     ext = external_nbt_viewer_dir()
     pkg = packaged_nbt_viewer_dir()
-    ext_mc = ext / "mcmeta"
+    key = (applied_mcmeta_version or "").strip()
 
+    def merged_for(mc: Path) -> Path | None:
+        if code_bundle_complete(pkg) and mcmeta_dir_complete(mc):
+            return write_merged_nbt_launcher(code_root=pkg, external_mcmeta=mc)
+        return None
+
+    if key:
+        root_v = ext / key
+        if full_bundle_complete(root_v):
+            return root_v / "index.html", "external"
+        m = merged_for(root_v / "mcmeta")
+        if m is not None:
+            return m, "merged"
+        # 旧版曾写入单层 nbt-viewer/mcmeta/：若 version.txt 与当前应用 id 一致则继续可用
+        leg = ext / "mcmeta"
+        if mcmeta_dir_complete(leg):
+            try:
+                recorded = leg.joinpath("version.txt").read_text(encoding="utf-8").strip()
+            except OSError:
+                recorded = ""
+            if recorded == key:
+                m_legacy = merged_for(leg)
+                if m_legacy is not None:
+                    return m_legacy, "merged"
+        return None, "none"
+
+    legacy_mc = ext / "mcmeta"
     if full_bundle_complete(ext):
         return ext / "index.html", "external"
-    if code_bundle_complete(pkg) and mcmeta_dir_complete(ext_mc):
-        return write_merged_nbt_launcher(code_root=pkg, external_mcmeta=ext_mc), "merged"
+    m = merged_for(legacy_mc)
+    if m is not None:
+        return m, "merged"
     return None, "none"

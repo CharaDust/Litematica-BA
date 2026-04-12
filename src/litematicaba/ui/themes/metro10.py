@@ -38,6 +38,16 @@ def build_qss() -> str:
     }
     QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
 
+    /* 列表默认行高约定：60px；QComboBox 下拉项：32px */
+    QListWidget::item,
+    QTreeView::item,
+    QTableView::item {
+        min-height: 60px;
+    }
+    QComboBox QListView::item {
+        min-height: 32px;
+    }
+
     QPushButton, QToolButton {
         background-color: #cccccc;
         border: 2px solid transparent;

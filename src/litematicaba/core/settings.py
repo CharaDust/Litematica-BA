@@ -39,7 +39,7 @@ class AppSettings:
     deepslate_check_updates_on_startup: bool = False
     # 3D 轨道：纵向拖拽符号；勾选后适合与鼠标默认相反的触摸屏习惯
     deepslate_invert_y: bool = False
-    # NBT Viewer：下载 mcmeta 时指定的 MC 版本 id（如 1.21.4）；空字符串表示按「最新稳定版」解析
+    # NBT 3D 预览当前应用的 MC 数据资源版本 id（如 1.21.4），对应 user_data/.../nbt-viewer/<id>/mcmeta/
     nbt_mcmeta_target_version: str = ""
 
     def normalized(self) -> AppSettings:

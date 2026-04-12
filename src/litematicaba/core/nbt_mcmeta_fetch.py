@@ -83,6 +83,43 @@ def filter_mcmeta_catalog_for_picker(catalog: list[McmetaVersionEntry]) -> list[
     return picked
 
 
+def latest_stable_release_id_from_catalog(catalog: list[McmetaVersionEntry]) -> str | None:
+    """目录内「最新稳定正式版」的 id（按 data_version 最高）。"""
+    best: str | None = None
+    best_dv = -1
+    for e in catalog:
+        if e.type == "release" and e.stable and e.data_version >= best_dv:
+            best_dv = e.data_version
+            best = e.id
+    return best
+
+
+def is_safe_mcmeta_version_dir_name(version_id: str) -> bool:
+    s = (version_id or "").strip()
+    if not s or "/" in s or "\\" in s or s in (".", ".."):
+        return False
+    return True
+
+
+def remove_versioned_mcmeta_assets(out_base: Path, version_id: str) -> bool:
+    """删除 ``out_base/<version_id>/``（若存在且名为安全版本 id）。返回是否删除了目录。"""
+    if not is_safe_mcmeta_version_dir_name(version_id):
+        return False
+    try:
+        base = out_base.resolve()
+    except OSError:
+        return False
+    root = (base / version_id.strip()).resolve()
+    if not root.is_dir():
+        return False
+    try:
+        root.relative_to(base)
+    except ValueError:
+        return False
+    shutil.rmtree(root, ignore_errors=True)
+    return True
+
+
 def resolve_mcmeta_version(version_spec: str | None) -> tuple[str, str | None]:
     """返回 ``(版本 id, 警告文案)``；指定版本不存在时回退最新稳定版并附带警告。"""
     data = json.loads(_fetch(f"{MCMETA_RAW}/summary/versions/data.min.json").decode("utf-8"))
@@ -150,16 +187,16 @@ def run_mcmeta_fetch(
     copy_packaged_ui: bool = False,
     repo_root: Path | None = None,
 ) -> McmetaFetchResult:
-    """写入 ``out_base/mcmeta/`` 下四件套 + ``version.txt``。
+    """写入 ``out_base/<版本 id>/mcmeta/`` 下四件套 + ``version.txt``。
 
     ``version_spec`` 非空时尝试匹配该 id；无效则回退最新稳定版（与旧脚本警告行为一致可后续再加）。
     ``with_ui_extras`` / ``copy_packaged_ui`` 需 ``repo_root`` 或默认可解析的源码树。
     """
     root = repo_root if repo_root is not None else _repo_root()
     out_base = out_base.resolve()
-    out_mc = out_base / "mcmeta"
     try:
         ver, ver_warn = resolve_mcmeta_version(version_spec)
+        out_mc = out_base / ver / "mcmeta"
         out_mc.mkdir(parents=True, exist_ok=True)
 
         blocks_url = f"{MCMETA_RAW}/{ver}-summary/blocks/data.min.json"
@@ -204,4 +241,4 @@ def run_mcmeta_fetch(
             msg += " " + "；".join(notes)
         return McmetaFetchResult(True, ver, out_mc, msg, warning=ver_warn)
     except Exception as exc:
-        return McmetaFetchResult(False, "", out_mc, str(exc), warning=None)
+        return McmetaFetchResult(False, "", out_base / "mcmeta", str(exc), warning=None)

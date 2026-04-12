@@ -17,6 +17,8 @@ _INPUT_OUTER_HEIGHT = 44
 _INPUT_BORDER_PX = 2
 _INPUT_PAD_V = 4
 _INPUT_PAD_H = 8
+# 列表行高约定（与输入框外高 44px 对齐）；QComboBox 下拉行高待定，不单独写 QSS。
+_LIST_ITEM_ROW_HEIGHT_PX = 44
 
 
 def build_qss() -> str:
@@ -64,6 +66,12 @@ def build_qss() -> str:
         background-color: #2b2b2b;
     }}
     QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 4px; }}
+
+    QListWidget::item,
+    QTreeView::item,
+    QTableView::item {{
+        min-height: {_LIST_ITEM_ROW_HEIGHT_PX}px;
+    }}
 
     QPushButton, QToolButton {{
         background-color: transparent;
