@@ -43,7 +43,12 @@
   <script>
 (function () {
   const canvas = document.getElementById("c");
-  const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false, antialias: true });
+  const gl = canvas.getContext("webgl", {
+    alpha: true,
+    premultipliedAlpha: false,
+    antialias: true,
+    preserveDrawingBuffer: true,
+  });
   if (!gl) {
     document.body.textContent = "WebGL 不可用";
     window.__lbaInternalApplyVoxels = function () {};
@@ -58,7 +63,10 @@
   const { mat4, vec3 } = glMatrix;
   const voxelRenderer = new DS.VoxelRenderer(gl);
   voxelRenderer.getPerspective = function () {
-    const aspect = this.gl.canvas.clientWidth / this.gl.canvas.clientHeight;
+    const cv = this.gl.canvas;
+    const bw = Math.max(1, cv.width || cv.clientWidth || 1);
+    const bh = Math.max(1, cv.height || cv.clientHeight || 1);
+    const aspect = bw / bh;
     const out = mat4.create();
     const fov = window.__lbaCameraFov | 0;
     if (fov <= 0) {
@@ -293,6 +301,9 @@
       syncFromPreset();
     }
     buildViewMatrix(viewMat);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.clearColor(42 / 255, 45 / 255, 52 / 255, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     voxelRenderer.draw(viewMat);
     requestAnimationFrame(tick);
   }
@@ -319,6 +330,7 @@
       let bx = 1;
       let by = 1;
       let bz = 1;
+      window.__lbaVoxelBounds = { has: false, minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 };
       if (normalized.length) {
         let minX = normalized[0].x;
         let maxX = normalized[0].x;
@@ -338,6 +350,15 @@
         bx = maxX - minX + 1;
         by = maxY - minY + 1;
         bz = maxZ - minZ + 1;
+        window.__lbaVoxelBounds = {
+          has: true,
+          minX,
+          minY,
+          minZ,
+          maxX,
+          maxY,
+          maxZ,
+        };
       }
       window.__lbaVoxelBBoxSize = [bx, by, bz];
       voxelRenderer.setVoxels(normalized);
@@ -350,6 +371,124 @@
   while (window.__lbaVoxelQueue.length) {
     window.__lbaInternalApplyVoxels(window.__lbaVoxelQueue.shift());
   }
+
+  function lbaDeepslateMaxNdcAtDist(dist) {
+    const W = canvas.width;
+    const H = canvas.height;
+    const saveD = camDist;
+    const savePan = vec3.fromValues(pan[0], pan[1], pan[2]);
+    camDist = dist;
+    voxelRenderer.setViewport(0, 0, W, H);
+    buildViewMatrix(viewMat);
+    const proj = voxelRenderer.getPerspective();
+    const mvp = mat4.create();
+    mat4.multiply(mvp, proj, viewMat);
+    const B = window.__lbaVoxelBounds;
+    let maxAbs = 0;
+    if (!B || !B.has) {
+      camDist = saveD;
+      vec3.copy(pan, savePan);
+      return 0;
+    }
+    const xs = [B.minX, B.maxX + 1];
+    const ys = [B.minY, B.maxY + 1];
+    const zs = [B.minZ, B.maxZ + 1];
+    for (let i = 0; i < 2; i++) {
+      for (let j = 0; j < 2; j++) {
+        for (let k = 0; k < 2; k++) {
+          const x = xs[i];
+          const y = ys[j];
+          const z = zs[k];
+          const cx = mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12];
+          const cy = mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13];
+          const cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
+          if (cw <= 1e-6) {
+            maxAbs = 10;
+            break;
+          }
+          const ax = Math.abs(cx / cw);
+          const ay = Math.abs(cy / cw);
+          if (ax > maxAbs) maxAbs = ax;
+          if (ay > maxAbs) maxAbs = ay;
+        }
+      }
+    }
+    camDist = saveD;
+    vec3.copy(pan, savePan);
+    return maxAbs;
+  }
+
+  /**
+   * @param {'screen'|'full'} mode
+   */
+  window.lbaDeepslateCaptureRenderPng = function (mode) {
+    return new Promise(function (resolve) {
+      const m = mode === "full" ? "full" : "screen";
+      if (m === "screen") {
+        requestAnimationFrame(function () {
+          try {
+            resolve(canvas.toDataURL("image/png"));
+          } catch (e) {
+            resolve("");
+          }
+        });
+        return;
+      }
+      const saveD = camDist;
+      const savePan = vec3.fromValues(pan[0], pan[1], pan[2]);
+      try {
+        resize();
+        const W = canvas.width;
+        const H = canvas.height;
+        const B = window.__lbaVoxelBounds;
+        if (!B || !B.has) {
+          buildViewMatrix(viewMat);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.clearColor(42 / 255, 45 / 255, 52 / 255, 1);
+          gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+          voxelRenderer.draw(viewMat);
+          if (typeof gl.finish === "function") gl.finish();
+          resolve(canvas.toDataURL("image/png"));
+          return;
+        }
+        pan[0] = (B.minX + B.maxX + 1) / 2;
+        pan[1] = (B.minY + B.maxY + 1) / 2;
+        pan[2] = (B.minZ + B.maxZ + 1) / 2;
+        let hi = Math.max(CAM_DIST_MIN, saveD);
+        let guard = 0;
+        while (lbaDeepslateMaxNdcAtDist(hi) > 0.88 && hi < CAM_DIST_MAX && guard < 48) {
+          hi = Math.min(hi * 1.35, CAM_DIST_MAX);
+          guard++;
+        }
+        let lo = CAM_DIST_MIN;
+        let b = hi;
+        while (b - lo > 0.35) {
+          const mid = (lo + b) / 2;
+          if (lbaDeepslateMaxNdcAtDist(mid) <= 0.88) b = mid;
+          else lo = mid;
+        }
+        camDist = b;
+        voxelRenderer.setViewport(0, 0, W, H);
+        buildViewMatrix(viewMat);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, W, H);
+        gl.clearColor(42 / 255, 45 / 255, 52 / 255, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        voxelRenderer.draw(viewMat);
+        if (typeof gl.finish === "function") gl.finish();
+        const url = canvas.toDataURL("image/png");
+        camDist = saveD;
+        vec3.copy(pan, savePan);
+        voxelRenderer.setViewport(0, 0, canvas.width, canvas.height);
+        resolve(url);
+      } catch (e2) {
+        camDist = saveD;
+        vec3.copy(pan, savePan);
+        voxelRenderer.setViewport(0, 0, canvas.width, canvas.height);
+        resolve("");
+      }
+    });
+  };
 
   resize();
   requestAnimationFrame(tick);

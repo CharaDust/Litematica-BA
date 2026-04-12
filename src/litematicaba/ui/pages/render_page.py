@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QThread, QTimer, QUrl, Qt, QSize, Signal
-from PySide6.QtGui import QImage, QShowEvent
+from PySide6.QtGui import QImage, QPixmap, QShowEvent
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFileDialog,
     QGridLayout,
     QGroupBox,
@@ -17,6 +19,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSlider,
     QStyle,
@@ -106,6 +109,101 @@ _EMPTY_VOXELS_B64 = base64.b64encode(
 ).decode("ascii")
 
 
+class RenderCapturePreviewDialog(QDialog):
+    """截屏 / 导出后的简易预览：可保存 PNG 或写入属性页预览图。"""
+
+    _PREVIEW_MAX_EDGE_PX = 720
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        title: str,
+        image: QImage,
+        *,
+        apply_preview: Callable[[QImage], None],
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self._full_image = image
+        self._apply_preview = apply_preview
+        self._label = QLabel()
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumSize(420, 300)
+        scroll.setWidget(self._label)
+        btn_save = QPushButton("保存为 PNG…")
+        btn_preview = QPushButton("写入预览图")
+        btn_close = QPushButton("关闭")
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(btn_save)
+        btn_row.addWidget(btn_preview)
+        btn_row.addWidget(btn_close)
+        btn_row.addStretch(1)
+        root = QVBoxLayout(self)
+        root.addWidget(scroll, 1)
+        root.addLayout(btn_row)
+        btn_save.clicked.connect(self._on_save_png)
+        btn_preview.clicked.connect(self._on_write_preview)
+        btn_close.clicked.connect(self.reject)
+        self._refresh_thumbnail()
+
+    def _refresh_thumbnail(self) -> None:
+        img = self._full_image
+        if img.isNull():
+            self._label.setText("（无图像）")
+            return
+        max_e = self._PREVIEW_MAX_EDGE_PX
+        w, h = img.width(), img.height()
+        if max(w, h) <= max_e:
+            self._label.setPixmap(QPixmap.fromImage(img))
+            return
+        if w >= h:
+            nw = max_e
+            nh = max(1, round(h * max_e / w))
+        else:
+            nh = max_e
+            nw = max(1, round(w * max_e / h))
+        thumb = img.scaled(
+            nw,
+            nh,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._label.setPixmap(QPixmap.fromImage(thumb))
+
+    def _on_save_png(self) -> None:
+        if self._full_image.isNull():
+            QMessageBox.warning(self, "保存", "没有可保存的图像。")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "保存 PNG",
+            str(Path.home() / "render_capture.png"),
+            "PNG (*.png)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".png"):
+            path += ".png"
+        if not self._full_image.save(path, "PNG"):
+            QMessageBox.warning(self, "保存", "保存失败。")
+            return
+        QMessageBox.information(self, "保存", f"已保存：\n{path}")
+
+    def _on_write_preview(self) -> None:
+        if self._full_image.isNull():
+            QMessageBox.warning(self, "预览图", "没有可写入的图像。")
+            return
+        self._apply_preview(self._full_image)
+        QMessageBox.information(
+            self,
+            "预览图",
+            "已写入属性页预览（内存）。请到「属性」页确认并保存文件以写入 PreviewImageData。",
+        )
+
+
 def _effective_camera_fov_for_slider(raw: int) -> int:
     """磁吸：刻度 1–14 视为 0°，15–29 视为 30°；其它为实际值。"""
     r = int(raw)
@@ -175,6 +273,9 @@ class RenderPage(QWidget):
         self._nbt_applied_mcmeta_version = ""
         if app_settings is not None:
             self._nbt_applied_mcmeta_version = (app_settings.nbt_mcmeta_target_version or "").strip()
+        self._cache_nbt_export_params_from_settings(
+            app_settings if app_settings is not None else AppSettings()
+        )
         self._nbt_html_path, self._nbt_viewer_mode = resolve_nbt_viewer_html_path(
             self._nbt_applied_mcmeta_version
         )
@@ -185,7 +286,6 @@ class RenderPage(QWidget):
         self._pending_b64: str | None = None
         self._pending_nbt_b64: str | None = None
         self._viewer_ready: bool = False
-        self._canvas_png_action: str | None = None
 
         self._lbl_path = QLabel("请在「属性」页加载 .litematic。")
         self._lbl_path.setWordWrap(True)
@@ -257,14 +357,19 @@ class RenderPage(QWidget):
         btn_row = QHBoxLayout()
         self._btn_material = QPushButton("材料列表（当前区域）")
         self._btn_material.clicked.connect(self._on_material_list)
-        self._btn_export = QPushButton("导出 PNG…")
-        self._btn_export.clicked.connect(self._on_export_png)
-        self._btn_preview = QPushButton("写入属性预览图…")
-        self._btn_preview.setToolTip("从当前 WebGL 画布导出 PNG，裁切并缩放为 140×140 写入属性页预览")
-        self._btn_preview.clicked.connect(self._on_write_preview)
+        self._btn_screenshot = QPushButton("截屏…")
+        self._btn_screenshot.setToolTip("截取当前 3D 视图画布，在预览窗口中可保存或写入属性预览图")
+        self._btn_screenshot.clicked.connect(self._on_screenshot_capture)
+        self._btn_export_full = QPushButton("导出…")
+        self._btn_export_full.setToolTip(
+            "完整入镜导出：保持当前水平/仰角（cRot），将观察目标对准结构中心并拉远距离，使整体尽量落在画面内；"
+            "分辨率与当前视口一致，需要更清晰时请拉大渲染区窗口。"
+            " 透视与正交（FOV=0°）下的距离启发式可在「选项」—「NBT 3D — 完整入镜导出」中调整。"
+        )
+        self._btn_export_full.clicked.connect(self._on_full_export_capture)
         btn_row.addWidget(self._btn_material)
-        btn_row.addWidget(self._btn_export)
-        btn_row.addWidget(self._btn_preview)
+        btn_row.addWidget(self._btn_screenshot)
+        btn_row.addWidget(self._btn_export_full)
         btn_row.addStretch()
 
         self._status = QLabel("")
@@ -310,6 +415,32 @@ class RenderPage(QWidget):
 
         self._props.active_file_changed.connect(self._on_active_file_changed)
 
+    def _cache_nbt_export_params_from_settings(self, s: AppSettings) -> None:
+        n = s.normalized()
+        self._nbt_export_margin = n.nbt_export_full_margin
+        self._nbt_export_perspective_min_distance = n.nbt_export_full_perspective_min_distance
+        self._nbt_export_perspective_diag_extra = n.nbt_export_full_perspective_diag_extra
+        self._nbt_export_orthographic_need_half_padding = n.nbt_export_full_orthographic_need_half_padding
+        self._nbt_export_orthographic_height_scale = n.nbt_export_full_orthographic_height_scale
+        self._nbt_export_orthographic_diag_extra = n.nbt_export_full_orthographic_diag_extra
+        self._nbt_export_orthographic_min_distance = n.nbt_export_full_orthographic_min_distance
+        self._nbt_export_orthographic_half_height_min = n.nbt_export_full_orthographic_half_height_min
+
+    def _sync_export_full_params_js(self) -> None:
+        if self._view is None or not self._viewer_ready or not self._use_nbt_viewer:
+            return
+        payload = {
+            "margin": self._nbt_export_margin,
+            "perspectiveMinDist": self._nbt_export_perspective_min_distance,
+            "perspectiveDiagExtra": self._nbt_export_perspective_diag_extra,
+            "orthographicNeedHalfPadding": self._nbt_export_orthographic_need_half_padding,
+            "orthographicHeightScale": self._nbt_export_orthographic_height_scale,
+            "orthographicDiagExtra": self._nbt_export_orthographic_diag_extra,
+            "orthographicMinDist": self._nbt_export_orthographic_min_distance,
+            "orthographicHalfHeightMin": self._nbt_export_orthographic_half_height_min,
+        }
+        self._view.page().runJavaScript(f"window.__lbaExportFullParams={json.dumps(payload)};")
+
     def _on_refresh_clicked(self) -> None:
         """重新解析 NBT 查看器入口（外部 data 或合并页），再加载当前投影。"""
         p, m = resolve_nbt_viewer_html_path(self._nbt_applied_mcmeta_version)
@@ -339,8 +470,10 @@ class RenderPage(QWidget):
             self._on_refresh_clicked()
             return
         self._nbt_camera_debug = bool(s.nbt_viewer_camera_debug)
+        self._cache_nbt_export_params_from_settings(s)
         if self._use_nbt_viewer:
             self._push_nbt_camera_debug()
+            self._sync_export_full_params_js()
         else:
             self._push_invert_y_to_webview()
 
@@ -417,6 +550,7 @@ class RenderPage(QWidget):
         """NBT 注入后：轨道相机恢复为 StructureEditor 初始 cRot/cPos/cDist（与「恢复默认视角」一致）。"""
         self._sync_nbt_default_camera_js()
         self._sync_camera_fov_js()
+        self._sync_export_full_params_js()
 
     def _inject_b64(self, b64: str) -> None:
         if self._view is None or not self._viewer_ready:
@@ -498,6 +632,7 @@ class RenderPage(QWidget):
                 self._push_invert_y_to_webview()
             else:
                 self._sync_camera_fov_js()
+                self._sync_export_full_params_js()
                 if not injected and self._props.active_file_path() is None:
                     self._pending_nbt_b64 = ""
                     self._try_inject_pending()
@@ -676,74 +811,82 @@ class RenderPage(QWidget):
         self._status.setText(f"已加载 Deepslate 体素。{extra}".strip())
         self._try_inject_pending()
 
-    def _grab_canvas_png(self, action: str) -> None:
-        if self._view is None or not self._viewer_ready:
-            QMessageBox.information(self, "渲染", "Web 视图未就绪，无法导出画布。")
-            return
-        self._canvas_png_action = action
-        if self._use_nbt_viewer:
-            js = (
-                "(() => { var c = document.querySelector("
-                "'canvas.structure-3d:not(.click-detection)'); "
-                "if (!c) return ''; try { return c.toDataURL('image/png'); } catch (e) { return ''; } })()"
-            )
-        else:
-            js = (
-                "(() => { var c = document.getElementById('c'); "
-                "if (!c) return ''; try { return c.toDataURL('image/png'); } catch (e) { return ''; } })()"
-            )
-        self._view.page().runJavaScript(js, self._on_canvas_data_url)
-
-    def _on_canvas_data_url(self, result: object) -> None:
-        action = self._canvas_png_action
-        self._canvas_png_action = None
-        if action is None:
-            return
+    @staticmethod
+    def _qimage_from_png_data_url(result: object) -> QImage | None:
         if not result:
-            QMessageBox.warning(self, "渲染", "无法从画布读取图像。")
-            return
+            return None
         s = str(result)
         prefix = "data:image/png;base64,"
         if not s.startswith(prefix):
-            QMessageBox.warning(self, "渲染", "画布返回的数据格式异常。")
-            return
+            return None
         try:
             raw = base64.b64decode(s[len(prefix) :], validate=True)
         except Exception:
-            QMessageBox.warning(self, "渲染", "无法解码 PNG 数据。")
-            return
+            return None
         img = QImage.fromData(raw, "PNG")
         if img.isNull():
-            QMessageBox.warning(self, "渲染", "无效的 PNG 图像。")
+            return None
+        return img
+
+    def _run_js_capture(self, mode: str, dialog_title: str) -> None:
+        if self._view is None or not self._viewer_ready:
+            QMessageBox.information(self, "渲染", "Web 视图未就绪，无法截取画布。")
             return
-        if action == "export":
-            path, _ = QFileDialog.getSaveFileName(
-                self,
-                "导出渲染图",
-                str(Path.home() / "render_preview.png"),
-                "PNG (*.png)",
+        # NBT：screen 为画布 toDataURL；full 为 StructureEditor._lbaExportPngDataUrlFull（同步字符串）。
+        mode_lit = json.dumps(mode)
+        if self._use_nbt_viewer:
+            if mode == "full":
+                js = (
+                    "(function(){try{"
+                    "var ed=window.__lbaNbtEditor;if(!ed||!ed.panels)return '';"
+                    "var key=ed.type==='chunk'?'chunk':(ed.type==='structure'?'structure':null);"
+                    "if(!key||!ed.panels[key])return '';"
+                    "var se=ed.panels[key].editor();if(!se||!se.canvas)return '';"
+                    "var isChunk=ed.type==='chunk';"
+                    "if(typeof se._lbaExportPngDataUrlFull==='function')"
+                    "return se._lbaExportPngDataUrlFull(isChunk);"
+                    "return '';}catch(e){return '';}})()"
+                )
+            else:
+                js = (
+                    "(function(){var c=document.querySelector("
+                    "'canvas.structure-3d:not(.click-detection)');"
+                    "if(!c)return '';try{return c.toDataURL('image/png');}"
+                    "catch(e){return '';}})()"
+                )
+        elif mode == "full":
+            js = (
+                "(function(){try{return window.lbaDeepslateCaptureRenderPng("
+                f"{mode_lit}"
+                ");}catch(e){return Promise.resolve('');}})()"
             )
-            if not path:
-                return
-            if not path.lower().endswith(".png"):
-                path += ".png"
-            if not img.save(path, "PNG"):
-                QMessageBox.warning(self, "导出", "保存失败。")
-                return
-            QMessageBox.information(self, "导出", f"已保存：\n{path}")
-        elif action == "preview":
-            self._props.apply_render_as_preview(img)
-            QMessageBox.information(
-                self,
-                "预览图",
-                "已写入属性页预览（内存）。请到「属性」页确认并保存文件以写入 PreviewImageData。",
+        else:
+            js = (
+                "(function(){var c=document.getElementById('c');"
+                "if(!c)return '';try{return c.toDataURL('image/png');}"
+                "catch(e){return '';}})()"
             )
 
-    def _on_export_png(self) -> None:
-        self._grab_canvas_png("export")
+        def _done(res: object) -> None:
+            img = self._qimage_from_png_data_url(res)
+            if img is None:
+                QMessageBox.warning(self, "渲染", "无法从画布读取图像。")
+                return
+            dlg = RenderCapturePreviewDialog(
+                self,
+                dialog_title,
+                img,
+                apply_preview=self._props.apply_render_as_preview,
+            )
+            dlg.exec()
 
-    def _on_write_preview(self) -> None:
-        self._grab_canvas_png("preview")
+        self._view.page().runJavaScript(js, _done)
+
+    def _on_screenshot_capture(self) -> None:
+        self._run_js_capture("screen", "截屏预览")
+
+    def _on_full_export_capture(self) -> None:
+        self._run_js_capture("full", "导出预览")
 
     def _on_material_list(self) -> None:
         if self._props.active_file_path() is None:

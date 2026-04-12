@@ -13797,7 +13797,10 @@ var nbtEditor = (function (exports) {
             this.projMatrix = this.getPerspective();
         }
         getPerspective() {
-            const aspect = this.gl.canvas.clientWidth / this.gl.canvas.clientHeight;
+            const c = this.gl.canvas;
+            const bw = Math.max(1, c.width || c.clientWidth || 1);
+            const bh = Math.max(1, c.height || c.clientHeight || 1);
+            const aspect = bw / bh;
             const projMatrix = create$2();
             const fovDeg = typeof this.lbaFovDeg === 'number' ? this.lbaFovDeg : 70;
             if (fovDeg <= 0) {
@@ -21283,7 +21286,6 @@ var nbtEditor = (function (exports) {
         const value = parseInt((_a = el) === null || _a === void 0 ? void 0 : _a.value);
         return isNaN(value) ? undefined : value;
     }
-
     class StructureEditor {
         constructor(root, vscode, editHandler, readOnly) {
             this.root = root;
@@ -21313,7 +21315,7 @@ var nbtEditor = (function (exports) {
             this.resources = new ResourceManager(blocks, Object.assign(Object.assign({}, assets), { textures: uvMapping }), img);
             this.canvas = document.createElement('canvas');
             this.canvas.className = 'structure-3d';
-            const gl = this.canvas.getContext('webgl');
+            const gl = this.canvas.getContext('webgl', { preserveDrawingBuffer: true });
             this.structure = new Structure([0, 0, 0]);
             this.renderer = new StructureRenderer(gl, this.structure, this.resources);
             this.canvas2 = document.createElement('canvas');
@@ -21405,6 +21407,8 @@ var nbtEditor = (function (exports) {
             this._cameraDebugEl = null;
             this._renderFollowUp = false;
             this._lbaFovRafId = null;
+            /** 为完整导出时禁止将画布尺寸同步为 CSS 视口（否则会裁切）。 */
+            this._lbaSkipCanvasResizeSync = false;
             this.render();
         }
         _lbaStartFovHostSync() {
@@ -21439,6 +21443,10 @@ var nbtEditor = (function (exports) {
             requestAnimationFrame((time) => {
                 const delta = Math.max(0, time - requestTime);
                 this.resize();
+                const gl = this.renderer.gl;
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                gl.clearColor(30 / 255, 30 / 255, 30 / 255, 1);
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
                 if (this.movement.some(m => m)) {
                     rotateY(this.cPos, this.cPos, [0, 0, 0], this.cRot[0]);
                     const [w, a, s, d, space, shift] = this.movement;
@@ -21482,12 +21490,14 @@ var nbtEditor = (function (exports) {
                 this.canvas2.height = displayHeight2;
                 changed = true;
             }
-            const displayWidth = this.canvas.clientWidth;
-            const displayHeight = this.canvas.clientHeight;
-            if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
-                this.canvas.width = displayWidth;
-                this.canvas.height = displayHeight;
-                changed = true;
+            if (!this._lbaSkipCanvasResizeSync) {
+                const displayWidth = this.canvas.clientWidth;
+                const displayHeight = this.canvas.clientHeight;
+                if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
+                    this.canvas.width = displayWidth;
+                    this.canvas.height = displayHeight;
+                    changed = true;
+                }
             }
             if (this.canvas2.width > 0 && this.canvas2.height > 0) {
                 this.renderer2.setViewport(0, 0, this.canvas2.width, this.canvas2.height);
@@ -21651,8 +21661,101 @@ var nbtEditor = (function (exports) {
             translate(viewMatrix, viewMatrix, this.cPos);
             return viewMatrix;
         }
+        _lbaExportPngDataUrlFull(editorIsChunk) {
+            /* 不调用 resize()、不改 canvas 尺寸（避免 WebGL 重置）。仅临时调整相机：结构中心 + 估算 cDist，使 AABB 在当前 FOV/正交下尽量入镜；保留 cRot。 */
+            const saveDist = this.cDist;
+            const savePos = create$1();
+            copy(savePos, this.cPos);
+            const saveFov = this.cFovDeg;
+            try {
+                const W = this.canvas.width;
+                const H = this.canvas.height;
+                if (W < 2 || H < 2) {
+                    return '';
+                }
+                const sz = this.structure.getSize();
+                const sx = Math.max(Number(sz[0]) || 0, 1);
+                const sy = Math.max(Number(sz[1]) || 0, 1);
+                const sz2 = Math.max(Number(sz[2]) || 0, 1);
+                if (editorIsChunk) {
+                    copy(this.cPos, sz);
+                    mul(this.cPos, this.cPos, [-0.5, -1, -0.5]);
+                    add$1(this.cPos, this.cPos, [0, 16, 0]);
+                }
+                else {
+                    this.cPos[0] = -0.5 * sx;
+                    this.cPos[1] = -0.5 * sy;
+                    this.cPos[2] = -0.5 * sz2;
+                }
+                if (typeof window !== 'undefined' && typeof window.__lbaCameraFov === 'number') {
+                    this.cFovDeg = Math.max(0, Math.min(110, window.__lbaCameraFov | 0));
+                }
+                const diag = Math.hypot(sx, sy, sz2);
+                const fovDegEff = typeof this.cFovDeg === 'number' ? this.cFovDeg : 70;
+                const _ep = (typeof window !== 'undefined' && window.__lbaExportFullParams && typeof window.__lbaExportFullParams === 'object')
+                    ? window.__lbaExportFullParams : {};
+                const _num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+                const margin = Math.max(1.001, _num(_ep.margin, 1.22));
+                const perspMinDist = Math.max(0.5, _num(_ep.perspectiveMinDist, 6));
+                const perspDiagExtra = Math.max(0, _num(_ep.perspectiveDiagExtra, 0.12));
+                const orthoNeedHalfPadding = Math.max(0, _num(_ep.orthographicNeedHalfPadding, 1));
+                const orthoHeightScale = Math.max(0.05, _num(_ep.orthographicHeightScale, 0.38));
+                const orthoDiagExtra = Math.max(0, _num(_ep.orthographicDiagExtra, 0.15));
+                const orthoMinDist = Math.max(0.5, _num(_ep.orthographicMinDist, 12));
+                const orthoHalfHeightMin = Math.max(0.1, _num(_ep.orthographicHalfHeightMin, 2.5));
+                const r = diag * 0.5 * margin;
+                if (fovDegEff <= 0) {
+                    const needHalfH = r + orthoNeedHalfPadding;
+                    this.cDist = Math.max(orthoMinDist, (needHalfH / orthoHeightScale) + diag * orthoDiagExtra);
+                }
+                else {
+                    const aspect = Math.max(W / H, 1e-6);
+                    const fovRad = Math.max(1, Math.min(110, fovDegEff)) * Math.PI / 180;
+                    const tanHalfY = Math.tan(fovRad * 0.5);
+                    const tanHalfX = tanHalfY * aspect;
+                    const dVert = r / tanHalfY;
+                    const dHorz = r / tanHalfX;
+                    this.cDist = Math.max(perspMinDist, Math.max(dVert, dHorz) + diag * perspDiagExtra);
+                }
+                const orthoH = Math.max(this.cDist * orthoHeightScale, orthoHalfHeightMin);
+                this.renderer.lbaFovDeg = this.cFovDeg;
+                this.renderer.lbaOrthoHalfHeight = orthoH;
+                this.renderer.setViewport(0, 0, W, H);
+                const gl = this.renderer.gl;
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                gl.viewport(0, 0, W, H);
+                gl.clearColor(30 / 255, 30 / 255, 30 / 255, 1);
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+                const viewMatrix = this.getViewMatrix();
+                if (this.gridActive) {
+                    this.renderer.drawGrid(viewMatrix);
+                }
+                if (this.invisibleBlocksActive) {
+                    this.renderer.drawInvisibleBlocks(viewMatrix);
+                }
+                this.renderer.drawStructure(viewMatrix);
+                if (this.selectedBlock) {
+                    this.renderer.drawOutline(viewMatrix, this.selectedBlock);
+                }
+                if (typeof gl.finish === 'function') {
+                    gl.finish();
+                }
+                return this.canvas.toDataURL('image/png');
+            }
+            finally {
+                this.cDist = saveDist;
+                copy(this.cPos, savePos);
+                this.cFovDeg = saveFov;
+                this.render();
+            }
+        }
         selectBlock(x, y) {
             const viewMatrix = this.getViewMatrix();
+            const gl2 = this.gl2;
+            gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);
+            this.renderer2.setViewport(0, 0, this.canvas2.width, this.canvas2.height);
+            gl2.clearColor(0, 0, 0, 0);
+            gl2.clear(gl2.COLOR_BUFFER_BIT | gl2.DEPTH_BUFFER_BIT);
             this.renderer2.drawColoredStructure(viewMatrix);
             const color = new Uint8Array(4);
             this.gl2.readPixels(x, this.canvas2.height - y, 1, 1, this.gl2.RGBA, this.gl2.UNSIGNED_BYTE, color);
