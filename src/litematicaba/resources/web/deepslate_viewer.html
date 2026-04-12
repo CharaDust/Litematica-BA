@@ -132,6 +132,9 @@
   const ORBIT_SENS = 0.005;
   const PITCH_MIN = -1.45;
   const PITCH_MAX = 1.45;
+  const CAM_DIST_MIN = 2;
+  const CAM_DIST_MAX = 50000;
+  const WHEEL_ZOOM_SENS = 0.0012;
 
   function panScale() {
     const w = canvas.clientWidth || 1;
@@ -142,6 +145,20 @@
   canvas.addEventListener("contextmenu", function (e) {
     e.preventDefault();
   });
+
+  canvas.addEventListener(
+    "wheel",
+    function (e) {
+      e.preventDefault();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 16;
+      else if (e.deltaMode === 2) dy *= canvas.clientHeight || 1;
+      camDist *= Math.exp(-dy * WHEEL_ZOOM_SENS);
+      if (camDist < CAM_DIST_MIN) camDist = CAM_DIST_MIN;
+      if (camDist > CAM_DIST_MAX) camDist = CAM_DIST_MAX;
+    },
+    { passive: false }
+  );
 
   canvas.addEventListener("pointerdown", function (e) {
     if (e.button === 0) {

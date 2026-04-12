@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from pathlib import Path
+
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QFrame,
     QFormLayout,
     QGroupBox,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -17,14 +21,31 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from litematicaba.core.config import user_data_dir
+from litematicaba.core.nbt_mcmeta_fetch import McmetaFetchResult, run_mcmeta_fetch
 from litematicaba.core.render_bundle_update import show_renderer_update_info
 from litematicaba.core.settings import VALID_THEMES, AppSettings, save_settings
+from litematicaba.ui.mcmeta_version_picker_dialog import McmetaVersionPickerDialog
+
+
+class _McmetaFetchWorker(QThread):
+    finished_fetch = Signal(object)
+
+    def __init__(self, out_base: Path, version_spec: str | None) -> None:
+        super().__init__()
+        self._out_base = out_base
+        self._version_spec = version_spec
+
+    def run(self) -> None:  # type: ignore[override]
+        r = run_mcmeta_fetch(out_base=self._out_base, version_spec=self._version_spec)
+        self.finished_fetch.emit(r)
 
 
 class OptionsPage(QWidget):
     """主题与侧栏调试相关选项。"""
 
     settings_changed = Signal(object)
+    nbt_game_assets_updated = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -90,9 +111,28 @@ class OptionsPage(QWidget):
         self._btn_deepslate_update.clicked.connect(self._on_deepslate_update_clicked)
         form_render.addRow(self._btn_deepslate_update)
 
+        g_nbt = QGroupBox("NBT 3D 预览 — 游戏资源（mcmeta）")
+        form_nbt = QFormLayout(g_nbt)
+        hint_nbt = QLabel(
+            "与 Minecraft 数据版本相关的方块定义、模型与图集，放在用户数据目录，不随应用安装包更新。"
+            " 更新 NBT Viewer 前端（editor.js）仍请使用仓库内 tools/build_nbt_viewer.ps1。"
+        )
+        hint_nbt.setWordWrap(True)
+        hint_nbt.setStyleSheet("color: palette(mid);")
+        form_nbt.addRow(hint_nbt)
+        self._lbl_nbt_mcmeta_status = QLabel("—")
+        self._lbl_nbt_mcmeta_status.setWordWrap(True)
+        form_nbt.addRow("当前 mcmeta：", self._lbl_nbt_mcmeta_status)
+        self._btn_nbt_fetch = QPushButton("选择版本并下载游戏资源…")
+        self._btn_nbt_fetch.clicked.connect(self._on_nbt_fetch_clicked)
+        form_nbt.addRow(self._btn_nbt_fetch)
+        self._nbt_fetch_worker: _McmetaFetchWorker | None = None
+        self._nbt_mcmeta_last_choice = ""
+
         body_lay.addWidget(g_theme)
         body_lay.addWidget(g_dev)
         body_lay.addWidget(g_render)
+        body_lay.addWidget(g_nbt)
         body_lay.addStretch()
 
         self._theme.currentIndexChanged.connect(self._persist)
@@ -119,6 +159,8 @@ class OptionsPage(QWidget):
         self._tile_view_right_padding_px.setValue(s.tile_view_right_padding_px)
         self._deepslate_invert_y.setChecked(s.deepslate_invert_y)
         self._deepslate_check_startup.setChecked(s.deepslate_check_updates_on_startup)
+        self._nbt_mcmeta_last_choice = s.nbt_mcmeta_target_version
+        self._refresh_nbt_mcmeta_status_label()
         self._loading = False
 
     def current_settings(self) -> AppSettings:
@@ -132,10 +174,60 @@ class OptionsPage(QWidget):
             perf_test_overlay=self._perf_test_overlay.isChecked(),
             deepslate_check_updates_on_startup=self._deepslate_check_startup.isChecked(),
             deepslate_invert_y=self._deepslate_invert_y.isChecked(),
+            nbt_mcmeta_target_version=self._nbt_mcmeta_last_choice.strip(),
         ).normalized()
 
     def _on_deepslate_update_clicked(self) -> None:
         show_renderer_update_info(self)
+
+    def _nbt_assets_base_dir(self) -> Path:
+        return user_data_dir() / "minecraft-assets" / "nbt-viewer"
+
+    def _refresh_nbt_mcmeta_status_label(self) -> None:
+        ver_file = self._nbt_assets_base_dir() / "mcmeta" / "version.txt"
+        if ver_file.is_file():
+            try:
+                v = ver_file.read_text(encoding="utf-8").strip()
+                self._lbl_nbt_mcmeta_status.setText(f"已安装：{v}（{ver_file.parent}）")
+            except OSError:
+                self._lbl_nbt_mcmeta_status.setText(f"无法读取：{ver_file}")
+        else:
+            self._lbl_nbt_mcmeta_status.setText(
+                f"未安装。目录：{self._nbt_assets_base_dir() / 'mcmeta'}"
+            )
+
+    def _on_nbt_fetch_clicked(self) -> None:
+        if self._nbt_fetch_worker is not None and self._nbt_fetch_worker.isRunning():
+            return
+        dlg = McmetaVersionPickerDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        spec = dlg.selected_version_spec()
+        self._nbt_mcmeta_last_choice = spec if spec else ""
+        self._persist()
+        self._btn_nbt_fetch.setEnabled(False)
+        self._btn_nbt_fetch.setText("下载中…")
+        out_base = self._nbt_assets_base_dir()
+        self._nbt_fetch_worker = _McmetaFetchWorker(out_base, spec)
+        self._nbt_fetch_worker.finished_fetch.connect(self._on_nbt_fetch_finished)
+        self._nbt_fetch_worker.start()
+
+    def _on_nbt_fetch_finished(self, r: object) -> None:
+        self._btn_nbt_fetch.setEnabled(True)
+        self._btn_nbt_fetch.setText("选择版本并下载游戏资源…")
+        self._nbt_fetch_worker = None
+        if not isinstance(r, McmetaFetchResult):
+            return
+        self._refresh_nbt_mcmeta_status_label()
+        if r.warning:
+            QMessageBox.warning(self, "游戏资源", r.warning)
+        if not r.ok:
+            QMessageBox.critical(self, "游戏资源", r.message)
+            return
+        self._nbt_mcmeta_last_choice = r.version_id
+        self._persist()
+        QMessageBox.information(self, "游戏资源", r.message + "\n\n请到「渲染」页点击「重新加载 3D」或重启应用。")
+        self.nbt_game_assets_updated.emit()
 
     def _persist(self) -> None:
         if self._loading:

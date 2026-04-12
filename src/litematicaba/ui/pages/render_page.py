@@ -1,4 +1,4 @@
-"""渲染页（design §2.6）：Deepslate WebGL + FR-R.6 九向相机；资源为本地 vendor JS。"""
+"""渲染页：优先使用内置 vscode-nbt 同源 3D（StructureRenderer + litematicToStructure）；否则回退 Deepslate VoxelRenderer + 九向预设。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import base64
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QThread, QUrl, Qt, QSize, Signal
+from PySide6.QtCore import QThread, QTimer, QUrl, Qt, QSize, Signal
 from PySide6.QtGui import QImage, QShowEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -26,6 +26,11 @@ from PySide6.QtWidgets import (
 )
 
 from litematicaba.core.litematic_voxel_export import build_region_voxels_payload
+from litematicaba.core.nbt_viewer_bundle import (
+    external_nbt_viewer_dir,
+    packaged_nbt_viewer_dir,
+    resolve_nbt_viewer_html_path,
+)
 from litematicaba.core.settings import AppSettings
 from litematicaba.ui.material_list_dialog import MaterialListDialog
 from litematicaba.ui.pages.properties_page import PropertiesPage
@@ -37,6 +42,21 @@ try:
 except ImportError:
     _HAS_WEBENGINE = False
     QWebEngineView = None  # type: ignore[misc, assignment]
+
+
+if _HAS_WEBENGINE and QWebEngineView is not None:
+
+    class _DeepslateWebEngineView(QWebEngineView):
+        """避免 QWebEngineView 的 sizeHint/minimumSizeHint 抬高主窗口最小高度。"""
+
+        def minimumSizeHint(self) -> QSize:  # type: ignore[override]
+            return QSize(0, 0)
+
+        def sizeHint(self) -> QSize:  # type: ignore[override]
+            return QSize(0, 0)
+
+else:
+    _DeepslateWebEngineView = None  # type: ignore[misc, assignment]
 
 # 与 design §2.6.3.5 / FR-R.6 及前端 ``lbaSetViewPreset(0..8)`` 一致
 # 3×3：西北 北 东北 / 西 顶视 东 / 西南 南 东南
@@ -69,8 +89,12 @@ def _view_dir_button_square_side(widget: QWidget) -> int:
     return max(side, fallback)
 
 
+def _web_resources_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "resources" / "web"
+
+
 def _viewer_html_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "resources" / "web" / "deepslate_viewer.html"
+    return _web_resources_dir() / "deepslate_viewer.html"
 
 
 _EMPTY_VOXELS_B64 = base64.b64encode(
@@ -98,8 +122,26 @@ class _VoxelPayloadThread(QThread):
         self.result_ready.emit(payload, "")
 
 
+class _NbtRawFileThread(QThread):
+    """读取整份 .litematic 原始字节，供前端 Deepslate ``NbtFile.read``（与 vscode-nbt 一致）。"""
+
+    result_ready = Signal(str, str)  # b64, err
+
+    def __init__(self, path: Path, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._path = path.resolve()
+
+    def run(self) -> None:  # type: ignore[override]
+        try:
+            raw = self._path.read_bytes()
+        except OSError as exc:
+            self.result_ready.emit("", str(exc))
+            return
+        self.result_ready.emit(base64.b64encode(raw).decode("ascii"), "")
+
+
 class RenderPage(QWidget):
-    """Deepslate ``VoxelRenderer`` 与九向相机预设（FR-R.6）。"""
+    """3D 预览：vscode-nbt 同源（若资源齐全）或 Deepslate 体素回退。"""
 
     def __init__(
         self,
@@ -113,24 +155,29 @@ class RenderPage(QWidget):
         self._deepslate_invert_y: bool = (
             bool(app_settings.deepslate_invert_y) if app_settings is not None else False
         )
+        self._nbt_html_path, self._nbt_viewer_mode = resolve_nbt_viewer_html_path()
+        self._use_nbt_viewer: bool = bool(_HAS_WEBENGINE and self._nbt_html_path is not None)
         self._thread: _VoxelPayloadThread | None = None
+        self._nbt_thread: _NbtRawFileThread | None = None
         self._load_superseded: bool = False
         self._pending_b64: str | None = None
+        self._pending_nbt_b64: str | None = None
         self._viewer_ready: bool = False
         self._canvas_png_action: str | None = None
 
         self._lbl_path = QLabel("请在「属性」页加载 .litematic。")
         self._lbl_path.setWordWrap(True)
 
-        reg_row = QHBoxLayout()
+        self._region_strip = QWidget()
+        reg_row = QHBoxLayout(self._region_strip)
         reg_row.addWidget(QLabel("子区域："))
         self._region_combo = QComboBox()
         self._region_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._region_combo.currentIndexChanged.connect(self._on_region_changed)
         reg_row.addWidget(self._region_combo, 1)
 
-        dir_box = QGroupBox("观察方向（FR-R.6，相机预设）")
-        dir_outer = QVBoxLayout(dir_box)
+        self._dir_box = QGroupBox("观察方向（FR-R.6，相机预设）")
+        dir_outer = QVBoxLayout(self._dir_box)
         dir_center_row = QHBoxLayout()
         dir_center_row.addStretch(1)
         grid_host = QWidget()
@@ -166,7 +213,7 @@ class RenderPage(QWidget):
         dir_outer.addLayout(dir_center_row)
 
         self._btn_refresh = QPushButton("重新加载 3D")
-        self._btn_refresh.clicked.connect(self._schedule_load)
+        self._btn_refresh.clicked.connect(self._on_refresh_clicked)
 
         btn_row = QHBoxLayout()
         self._btn_material = QPushButton("材料列表（当前区域）")
@@ -187,8 +234,9 @@ class RenderPage(QWidget):
 
         root = QVBoxLayout(self)
         root.addWidget(self._lbl_path)
-        root.addLayout(reg_row)
-        root.addWidget(dir_box)
+        root.addWidget(self._region_strip)
+        root.addWidget(self._dir_box)
+        self._region_strip.setVisible(not self._use_nbt_viewer)
         root.addWidget(self._btn_refresh)
         root.addLayout(btn_row)
         root.addWidget(self._status)
@@ -203,10 +251,19 @@ class RenderPage(QWidget):
             root.addWidget(tip, 1)
             self._view = None
         else:
-            self._view = QWebEngineView()
+            assert _DeepslateWebEngineView is not None
+            self._view = _DeepslateWebEngineView()
+            self._view.setMinimumSize(0, 0)
+            self._view.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            )
             self._view.loadFinished.connect(self._on_view_load_finished)
-            html = _viewer_html_path()
-            if html.is_file():
+            if self._use_nbt_viewer:
+                html = self._nbt_html_path
+            else:
+                html = _viewer_html_path()
+            if html is not None and html.is_file():
                 self._view.load(QUrl.fromLocalFile(str(html.resolve())))
             else:
                 self._status.setText(f"缺少内置页面：{html}")
@@ -214,10 +271,30 @@ class RenderPage(QWidget):
 
         self._props.active_file_changed.connect(self._on_active_file_changed)
 
+    def _on_refresh_clicked(self) -> None:
+        """重新解析 NBT 查看器入口（外部 data 或合并页），再加载当前投影。"""
+        if self._view is not None and _HAS_WEBENGINE:
+            p, m = resolve_nbt_viewer_html_path()
+            now_nbt = p is not None
+            if now_nbt != self._use_nbt_viewer:
+                self._use_nbt_viewer = now_nbt
+                self._region_strip.setVisible(not now_nbt)
+            self._nbt_html_path, self._nbt_viewer_mode = p, m
+            if now_nbt and p is not None and p.is_file():
+                self._viewer_ready = False
+                self._view.load(QUrl.fromLocalFile(str(p.resolve())))
+            elif not now_nbt:
+                html = _viewer_html_path()
+                if html.is_file():
+                    self._viewer_ready = False
+                    self._view.load(QUrl.fromLocalFile(str(html.resolve())))
+        self._schedule_load()
+
     def apply_deepslate_settings(self, s: AppSettings) -> None:
         """由主窗口在选项变更时调用，同步 WebView 内纵向拖拽符号。"""
         self._deepslate_invert_y = bool(s.deepslate_invert_y)
-        self._push_invert_y_to_webview()
+        if not self._use_nbt_viewer:
+            self._push_invert_y_to_webview()
 
     def _push_invert_y_to_webview(self) -> None:
         if self._view is None or not self._viewer_ready:
@@ -247,8 +324,58 @@ class RenderPage(QWidget):
             return
         self._view.page().runJavaScript(f"window.lbaLoadVoxelsB64({json.dumps(b64)});")
 
+    def _inject_nbt_default_tree(self) -> None:
+        if self._view is None or not self._viewer_ready:
+            return
+        empty = json.dumps(
+            {
+                "name": "",
+                "root": {},
+                "compression": "none",
+                "littleEndian": False,
+                "bedrockHeader": None,
+            },
+            separators=(",", ":"),
+        )
+        js = (
+            "(function(){try{if(window.lbaDispatchNbtViewerInit){"
+            f"window.lbaDispatchNbtViewerInit({{type:'default',readOnly:true,content:{empty}}});"
+            "}}catch(e){console.error(e);}})();"
+        )
+        self._view.page().runJavaScript(js)
+
+    def _inject_nbt_structure_b64(self, b64: str) -> None:
+        if self._view is None or not self._viewer_ready:
+            return
+        b64_lit = json.dumps(b64)
+        js = (
+            "(function(){try{\n"
+            f"var b64={b64_lit};"
+            "var bin=atob(b64);"
+            "var u8=new Uint8Array(bin.length);"
+            "for(var i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);"
+            "var c=window.lbaReadNbtFileToJson(u8);"
+            "window.lbaDispatchNbtViewerInit({type:'structure',readOnly:true,content:c});"
+            "}catch(e){console.error(e);}"
+            "})();"
+        )
+        self._view.page().runJavaScript(js)
+
     def _try_inject_pending(self) -> None:
-        if self._view is None or not self._viewer_ready or self._pending_b64 is None:
+        if self._view is None or not self._viewer_ready:
+            return
+        if self._use_nbt_viewer:
+            if self._pending_nbt_b64 is None:
+                return
+            pending = self._pending_nbt_b64
+            self._pending_nbt_b64 = None
+            if pending == "":
+                self._inject_nbt_default_tree()
+            else:
+                self._inject_nbt_structure_b64(pending)
+            QTimer.singleShot(250, self._sync_view_preset_js)
+            return
+        if self._pending_b64 is None:
             return
         b64 = self._pending_b64
         self._pending_b64 = None
@@ -259,8 +386,13 @@ class RenderPage(QWidget):
         self._viewer_ready = bool(ok)
         if ok:
             self._try_inject_pending()
-            self._sync_view_preset_js()
-            self._push_invert_y_to_webview()
+            if not self._use_nbt_viewer:
+                self._sync_view_preset_js()
+                self._push_invert_y_to_webview()
+            else:
+                self._sync_view_preset_js()
+                if self._pending_nbt_b64 is None and self._props.active_file_path() is None:
+                    self._inject_nbt_default_tree()
         elif self._view is not None:
             self._status.setText("本地 Web 视图加载失败（请确认 resources/web 下 HTML 与 vendor 脚本齐全）。")
 
@@ -286,6 +418,8 @@ class RenderPage(QWidget):
 
     def _payload_region_name(self) -> str | None:
         """传给体素线程：``None`` 表示「全部区域合并」；非 ``None`` 为单区域名。"""
+        if self._use_nbt_viewer:
+            return None
         d = self._region_combo.currentData()
         if d is None:
             return None
@@ -320,6 +454,26 @@ class RenderPage(QWidget):
                 self._status.setText("需要 Qt WebEngine 才能加载 3D 体素。")
             return
 
+        if self._use_nbt_viewer:
+            if path is None:
+                self._pending_nbt_b64 = ""
+                self._try_inject_pending()
+                self._status.setText("无可用文件。")
+                return
+            resolved = path.resolve()
+            if self._nbt_thread is not None and self._nbt_thread.isRunning():
+                self._load_superseded = True
+                self._status.setText("读取投影文件中…（将应用最新一次操作）")
+                return
+            self._load_superseded = False
+            self._status.setText("读取投影文件中…")
+            nth = _NbtRawFileThread(resolved, self)
+            self._nbt_thread = nth
+            nth.result_ready.connect(self._on_nbt_thread_result)
+            nth.finished.connect(self._on_nbt_thread_finished)
+            nth.start()
+            return
+
         if path is None or self._region_combo.count() <= 0:
             self._pending_b64 = _EMPTY_VOXELS_B64
             self._try_inject_pending()
@@ -339,6 +493,41 @@ class RenderPage(QWidget):
         th.result_ready.connect(self._on_thread_result)
         th.finished.connect(self._on_thread_finished)
         th.start()
+
+    def _on_nbt_thread_finished(self) -> None:
+        self._nbt_thread = None
+        if self._load_superseded:
+            self._load_superseded = False
+            self._schedule_load()
+
+    def _on_nbt_thread_result(self, b64: str, err: str) -> None:
+        if self._props.active_file_path() is None:
+            return
+        if self._view is None:
+            return
+        if err:
+            self._pending_nbt_b64 = ""
+            self._try_inject_pending()
+            self._status.setText(err)
+            QMessageBox.warning(self, "NBT 预览", err)
+            return
+        self._pending_nbt_b64 = b64
+        ver_path = external_nbt_viewer_dir() / "mcmeta" / "version.txt"
+        if not ver_path.is_file():
+            ver_path = packaged_nbt_viewer_dir() / "mcmeta" / "version.txt"
+        extra = ""
+        if ver_path.is_file():
+            try:
+                extra = f"（mcmeta {ver_path.read_text(encoding='utf-8').strip()}）"
+            except OSError:
+                pass
+        mode_hint = (
+            f" [{self._nbt_viewer_mode}]"
+            if self._nbt_viewer_mode in ("external", "merged")
+            else ""
+        )
+        self._status.setText(f"已加载 vscode-nbt 同源 3D 预览{mode_hint}。{extra}".strip())
+        self._try_inject_pending()
 
     def _on_thread_finished(self) -> None:
         self._thread = None
@@ -379,10 +568,17 @@ class RenderPage(QWidget):
             QMessageBox.information(self, "渲染", "Web 视图未就绪，无法导出画布。")
             return
         self._canvas_png_action = action
-        js = (
-            "(() => { var c = document.getElementById('c'); "
-            "if (!c) return ''; try { return c.toDataURL('image/png'); } catch (e) { return ''; } })()"
-        )
+        if self._use_nbt_viewer:
+            js = (
+                "(() => { var c = document.querySelector("
+                "'canvas.structure-3d:not(.click-detection)'); "
+                "if (!c) return ''; try { return c.toDataURL('image/png'); } catch (e) { return ''; } })()"
+            )
+        else:
+            js = (
+                "(() => { var c = document.getElementById('c'); "
+                "if (!c) return ''; try { return c.toDataURL('image/png'); } catch (e) { return ''; } })()"
+            )
         self._view.page().runJavaScript(js, self._on_canvas_data_url)
 
     def _on_canvas_data_url(self, result: object) -> None:

@@ -39,6 +39,8 @@ class AppSettings:
     deepslate_check_updates_on_startup: bool = False
     # 3D 轨道：纵向拖拽符号；勾选后适合与鼠标默认相反的触摸屏习惯
     deepslate_invert_y: bool = False
+    # NBT Viewer：下载 mcmeta 时指定的 MC 版本 id（如 1.21.4）；空字符串表示按「最新稳定版」解析
+    nbt_mcmeta_target_version: str = ""
 
     def normalized(self) -> AppSettings:
         t = self.theme_id if self.theme_id in VALID_THEMES else DEFAULT_THEME
@@ -52,6 +54,7 @@ class AppSettings:
             perf_test_overlay=bool(self.perf_test_overlay),
             deepslate_check_updates_on_startup=bool(self.deepslate_check_updates_on_startup),
             deepslate_invert_y=bool(self.deepslate_invert_y),
+            nbt_mcmeta_target_version=str(self.nbt_mcmeta_target_version or "").strip()[:64],
         )
 
 
@@ -77,6 +80,7 @@ def load_settings() -> AppSettings:
         perf_test_overlay=bool(raw.get("perf_test_overlay", False)),
         deepslate_check_updates_on_startup=bool(raw.get("deepslate_check_updates_on_startup", False)),
         deepslate_invert_y=bool(raw.get("deepslate_invert_y", False)),
+        nbt_mcmeta_target_version=str(raw.get("nbt_mcmeta_target_version", "") or ""),
     ).normalized()
 
 

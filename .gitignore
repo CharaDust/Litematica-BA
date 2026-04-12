@@ -12,3 +12,5 @@ error.log
 /.venv
 /data
 /tmp
+/third_party/vscode-nbt/node_modules/
+/third_party/vscode-nbt/out/

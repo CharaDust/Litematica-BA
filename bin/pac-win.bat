@@ -69,10 +69,12 @@ echo [pac-win] Version from src: !PKVER!  pack# !PKCNT!  exe base: !EXENAME!
 echo [pac-win] Building one-file GUI exe - may take a few minutes.
 
 if "!MODE!"=="full" (
+  REM 含 deepslate_viewer.html、vendor/、nbt-viewer/；否则冻结环境下仅能打开展平后的 .py，HTML 与脚本不在 _MEIPASS
   "%ROOT%\.venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed ^
     --name "!EXENAME!" --paths "%ROOT%\src" ^
     --hidden-import PySide6.QtSvg ^
     --add-data "%ROOT%\src\litematicaba\ui\resources;litematicaba\ui\resources" ^
+    --add-data "%ROOT%\src\litematicaba\resources\web;litematicaba\resources\web" ^
     --add-data "%ROOT%\logo;logo" ^
     "%ROOT%\src\litematicaba\__main__.py"
 ) else (
