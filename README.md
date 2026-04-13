@@ -1,6 +1,7 @@
+![alt text](logo/logo_full.png)
 **简体中文** | [English](./README_EN.md)
 
-# LitematicaViewer投影查看器 v0.7.6+
+# Litematica Blueprint Assistant 投影蓝图助手
 
 ### Minecraft tool - 让我的世界投影查看更加的轻量便捷
 
@@ -9,49 +10,99 @@
 [![转发](https://img.shields.io/badge/-转发-00A1D6?logo=bilibili&logoColor=white)](https://space.bilibili.com/3494373232741268)
 [![YoutubeIntro](https://img.shields.io/badge/-Youtube-00A1D6?logo=youtube&logoColor=red)](https://www.youtube.com/watch?v=0nofWrfKJeg)
 
-GITHUB链接: https://github.com/albertchen857/LitematicaViewer
+
+
+源项目GITHUB链接: https://github.com/albertchen857/LitematicaViewer
 稳定版EXE文件右侧Resource下载
 最新(预览)版本PYTHON文件自行克隆 (如果发现问题请多多写写ISSUE谢谢)
 求求点点星吧 I want Stars~ target 100 stars
 
 一个轻量便捷的投影查看器
 
-- `导入` 导入投影文件
-- `导出` 导出投影数据 (文本&表格)
-- `分类导出` 导出分类投影数据 (文本&表格)
-- `简洁分析` 轻量分析，只会显示方块名与数量
-- `容器分析器` 容器分析，显示容器中存储的方块和基础信息
-- `步骤查看器` 渲染投影各层方块,包括其方块和属性
-- `生成图形投影` 快捷生成一个常规立方体
-- `替换特定方块` 快速替换/限制投影里的不同方块
-- `3D渲染` 3D渲染目标投影 (可能引起卡顿)
-- `跨版本转换投影` 将默认最新版本投影转换到1.16/1.13版本的投影文件
-- `界面颜色` 更改界面主题色 (蔚蓝色,亮绿色,暗灰色,深蓝色,粉色)
+## 功能列表
+此处列出项目已实现/规划中的功能。若要查看完整的设计细节，请移步[至此](docs/design.md)
 
-# 分支图
+### 投影库
+投影文件资源管理器，搜集离散分布的文件并统一管理
+- [ ] 基本实现
+- [ ] 从外部来源获取投影
+### 属性
+读取并解析文件内的SNBT数据，并提供合适的修改选项
+- [x] 导入投影文件
+- [x] 解析并读取SNBT数据
+	- [x] 文字数据（读写）：内部名称，作者，描述
+	- [x] 格式数据（只读）：时间、尺寸、体积、版本
+	- [x] 图片数据（读写）：预览图（数组）
+	- [x] 分块数据（只读）：区域
+- [ ] 版本转换
 
-```
-投影查看器LitematicaViewer
-|-分析analysis
-| |-简洁分析simpleAnalysis
-| |-容器分析ContainerAnalysis
-| | |-普通分析Norm
-| | |-分类分析(开发ing)Cate
-| |-全面分析 (关闭)FullAnalysis
-|-导出Output
-| |-普通导出 (txt/csv)Norm
-| |-分类导出 (txt/csv)Cate
-|-统计Stat
-| |-常规统计 (红石/中位/其他)Basic
-| |-成分统计 (方块拼图)PieGraph
-|-功能func
-| |-3D渲染 (旋转/静止)3DRender
-| |-步骤查看器StepChecker
-| |-生成图形投影Polygon
-| | |-立方体生成Cube
-| | |-特殊形状生成(开发)Unusual
-| |-替换特定方块ChangeIndentifyBlock
-| |-投影转换版本 (1.17/1.15/1.12)TransVersion
-|-界面UI
-  |-字体/颜色/布局自定义美化 UIupdate (V0.7)
-```
+### 统计
+根据投影内容进行统计分析，以便快速判断投影属性
+- [x] 源项目统计学指标
+	- [x] 偏度：红石、液体
+	- [x] 统计分类
+	- [x] 密度
+- [ ] 方块分类统计
+- [ ] 生存模式实用指标
+	- [ ] 稀缺材料需求标签：如：粘液块、石英、珊瑚
+	- [ ] 特性标签：如：TNT复制
+
+### 分层
+自定义Y层级显示平面图
+- [ ] 方块状态叠加显示
+- [ ] 方块实体详情窗格
+	- [ ] 容器内容分析
+	- [ ] 告示牌内容分析
+
+### 渲染
+以3D的形式渲染投影结构
+- [ ] 嵌入式插件渲染（[参考项目](https://github.com/misode/vscode-nbt)）
+	- [x] 基本实现
+	- [ ] 区域拆分
+	- [x] 热更新并替换游戏资源
+- [ ] 自建deepslate渲染
+	- [x] 基本实现
+	- [x] 区域拆分
+	- [ ] 热更新并替换游戏资源
+- [x] 预设相机方向
+- [x] 自定义视场角（透视/正交）
+- [x] 截取并输出图像
+- [x] 渲染完整入镜模型并输出图像
+	- [x] 计算重心：相机距离
+
+### 替换
+快速替换/限制投影里的不同方块
+- [ ] 
+- [ ] 
+
+### 材料列表
+列出选定区域或层级所包含的方块数量
+- [ ] 单位统计（盒数、组数、余数）
+- [ ] 表项悬浮窗
+- [x] 多工作簿共存
+- [x] 导出列表数据
+	- [x] `.csv` 逗号分隔值文件
+	- [x] `.txt` ASCII艺术表
+- [x] 导入并解析列表数据
+	- [x] 读取由litematica模组导出的 `.csv` 逗号分隔值文件
+- [ ] Minecraft 方块物品图标
+
+### 用户界面
+- [ ] 主题
+	- [x] Metro10：类似Windows 10界面的主题
+	- [x] Minecraft：类似Minecraft界面的主题
+	- [ ] Bulletin Azure：类似Blue Archive界面的主题
+		- [ ] Bulletin意为”简报、档案“；Azure意为”蔚蓝色“
+	- [ ] 。。。
+
+### 枚举器
+提供或自定义预设的筛选枚举
+- [ ] 游戏数据值总表获取
+- [ ] 拖动分类功能
+
+### 简易几何投影生成
+快速生成指定投影结构
+- [ ] 常规立方体
+- [ ] 球体
+- [ ] 自定义曲线/曲面方程
+
