@@ -25,6 +25,17 @@ VALID_THEMES = (
 )
 DEFAULT_THEME = "QTDefault"
 
+# NBT「完整入镜导出」启发式默认值（与 editor.js 内回退值一致）
+NBT_EXPORT_FULL_MARGIN_DEFAULT = 1.22
+NBT_EXPORT_FULL_PERSPECTIVE_MIN_DISTANCE_DEFAULT = 6.0
+NBT_EXPORT_FULL_PERSPECTIVE_DIAG_EXTRA_DEFAULT = 0.12
+NBT_EXPORT_FULL_ORTHOGRAPHIC_NEED_HALF_PADDING_DEFAULT = 1.0
+NBT_EXPORT_FULL_ORTHOGRAPHIC_HEIGHT_SCALE_DEFAULT = 0.38
+NBT_EXPORT_FULL_ORTHOGRAPHIC_DIAG_EXTRA_DEFAULT = 0.15
+NBT_EXPORT_FULL_ORTHOGRAPHIC_MIN_DISTANCE_DEFAULT = 12.0
+NBT_EXPORT_FULL_ORTHOGRAPHIC_HALF_HEIGHT_MIN_DEFAULT = 2.5
+NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT = 48 * 48 * 48
+
 
 @dataclass
 class AppSettings:
@@ -34,6 +45,26 @@ class AppSettings:
     tile_auto_place_preferred_cols: int = 12
     tile_view_right_padding_px: int = 64
     show_widget_inspector: bool = False
+    perf_test_overlay: bool = False
+    # Deepslate / WebView 渲染包：默认不在启动时联网检查；见 design §2.0.4、§2.6.3.9
+    deepslate_check_updates_on_startup: bool = False
+    # 3D 轨道：纵向拖拽符号；勾选后适合与鼠标默认相反的触摸屏习惯
+    deepslate_invert_y: bool = False
+    # vscode-nbt 同源 3D：在画布上叠加 cPos / cRot / cDist 等相机原始数据
+    nbt_viewer_camera_debug: bool = False
+    # NBT 3D 预览当前应用的 MC 数据资源版本 id（如 1.21.4），对应 user_data/.../nbt-viewer/<id>/mcmeta/
+    nbt_mcmeta_target_version: str = ""
+    # NBT 完整入镜导出（FOV>0 透视 / FOV=0 正交）相机距离启发式；经 WebView 注入 __lbaExportFullParams
+    nbt_export_full_margin: float = NBT_EXPORT_FULL_MARGIN_DEFAULT
+    nbt_export_full_perspective_min_distance: float = NBT_EXPORT_FULL_PERSPECTIVE_MIN_DISTANCE_DEFAULT
+    nbt_export_full_perspective_diag_extra: float = NBT_EXPORT_FULL_PERSPECTIVE_DIAG_EXTRA_DEFAULT
+    nbt_export_full_orthographic_need_half_padding: float = NBT_EXPORT_FULL_ORTHOGRAPHIC_NEED_HALF_PADDING_DEFAULT
+    nbt_export_full_orthographic_height_scale: float = NBT_EXPORT_FULL_ORTHOGRAPHIC_HEIGHT_SCALE_DEFAULT
+    nbt_export_full_orthographic_diag_extra: float = NBT_EXPORT_FULL_ORTHOGRAPHIC_DIAG_EXTRA_DEFAULT
+    nbt_export_full_orthographic_min_distance: float = NBT_EXPORT_FULL_ORTHOGRAPHIC_MIN_DISTANCE_DEFAULT
+    nbt_export_full_orthographic_half_height_min: float = NBT_EXPORT_FULL_ORTHOGRAPHIC_HALF_HEIGHT_MIN_DEFAULT
+    # NBT 3D：触发“大结构渲染警告”前的体素数量阈值（x*y*z）
+    nbt_viewer_large_structure_threshold: int = NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT
 
     def normalized(self) -> AppSettings:
         t = self.theme_id if self.theme_id in VALID_THEMES else DEFAULT_THEME
@@ -44,6 +75,38 @@ class AppSettings:
             tile_auto_place_preferred_cols=max(1, min(64, int(self.tile_auto_place_preferred_cols))),
             tile_view_right_padding_px=max(0, min(300, int(self.tile_view_right_padding_px))),
             show_widget_inspector=bool(self.show_widget_inspector),
+            perf_test_overlay=bool(self.perf_test_overlay),
+            deepslate_check_updates_on_startup=bool(self.deepslate_check_updates_on_startup),
+            deepslate_invert_y=bool(self.deepslate_invert_y),
+            nbt_viewer_camera_debug=bool(self.nbt_viewer_camera_debug),
+            nbt_mcmeta_target_version=str(self.nbt_mcmeta_target_version or "").strip()[:64],
+            nbt_export_full_margin=max(
+                1.001, min(3.0, float(self.nbt_export_full_margin))
+            ),
+            nbt_export_full_perspective_min_distance=max(
+                0.5, min(500.0, float(self.nbt_export_full_perspective_min_distance))
+            ),
+            nbt_export_full_perspective_diag_extra=max(
+                0.0, min(2.0, float(self.nbt_export_full_perspective_diag_extra))
+            ),
+            nbt_export_full_orthographic_need_half_padding=max(
+                0.0, min(50.0, float(self.nbt_export_full_orthographic_need_half_padding))
+            ),
+            nbt_export_full_orthographic_height_scale=max(
+                0.05, min(2.0, float(self.nbt_export_full_orthographic_height_scale))
+            ),
+            nbt_export_full_orthographic_diag_extra=max(
+                0.0, min(2.0, float(self.nbt_export_full_orthographic_diag_extra))
+            ),
+            nbt_export_full_orthographic_min_distance=max(
+                0.5, min(500.0, float(self.nbt_export_full_orthographic_min_distance))
+            ),
+            nbt_export_full_orthographic_half_height_min=max(
+                0.1, min(100.0, float(self.nbt_export_full_orthographic_half_height_min))
+            ),
+            nbt_viewer_large_structure_threshold=max(
+                1_000, min(1_000_000_000, int(self.nbt_viewer_large_structure_threshold))
+            ),
         )
 
 
@@ -66,6 +129,62 @@ def load_settings() -> AppSettings:
         tile_auto_place_preferred_cols=int(raw.get("tile_auto_place_preferred_cols", 9)),
         tile_view_right_padding_px=int(raw.get("tile_view_right_padding_px", 64)),
         show_widget_inspector=bool(raw.get("show_widget_inspector", False)),
+        perf_test_overlay=bool(raw.get("perf_test_overlay", False)),
+        deepslate_check_updates_on_startup=bool(raw.get("deepslate_check_updates_on_startup", False)),
+        deepslate_invert_y=bool(raw.get("deepslate_invert_y", False)),
+        nbt_viewer_camera_debug=bool(raw.get("nbt_viewer_camera_debug", False)),
+        nbt_mcmeta_target_version=str(raw.get("nbt_mcmeta_target_version", "") or ""),
+        nbt_export_full_margin=float(
+            raw.get("nbt_export_full_margin", NBT_EXPORT_FULL_MARGIN_DEFAULT)
+        ),
+        nbt_export_full_perspective_min_distance=float(
+            raw.get(
+                "nbt_export_full_perspective_min_distance",
+                NBT_EXPORT_FULL_PERSPECTIVE_MIN_DISTANCE_DEFAULT,
+            )
+        ),
+        nbt_export_full_perspective_diag_extra=float(
+            raw.get(
+                "nbt_export_full_perspective_diag_extra",
+                NBT_EXPORT_FULL_PERSPECTIVE_DIAG_EXTRA_DEFAULT,
+            )
+        ),
+        nbt_export_full_orthographic_need_half_padding=float(
+            raw.get(
+                "nbt_export_full_orthographic_need_half_padding",
+                NBT_EXPORT_FULL_ORTHOGRAPHIC_NEED_HALF_PADDING_DEFAULT,
+            )
+        ),
+        nbt_export_full_orthographic_height_scale=float(
+            raw.get(
+                "nbt_export_full_orthographic_height_scale",
+                NBT_EXPORT_FULL_ORTHOGRAPHIC_HEIGHT_SCALE_DEFAULT,
+            )
+        ),
+        nbt_export_full_orthographic_diag_extra=float(
+            raw.get(
+                "nbt_export_full_orthographic_diag_extra",
+                NBT_EXPORT_FULL_ORTHOGRAPHIC_DIAG_EXTRA_DEFAULT,
+            )
+        ),
+        nbt_export_full_orthographic_min_distance=float(
+            raw.get(
+                "nbt_export_full_orthographic_min_distance",
+                NBT_EXPORT_FULL_ORTHOGRAPHIC_MIN_DISTANCE_DEFAULT,
+            )
+        ),
+        nbt_export_full_orthographic_half_height_min=float(
+            raw.get(
+                "nbt_export_full_orthographic_half_height_min",
+                NBT_EXPORT_FULL_ORTHOGRAPHIC_HALF_HEIGHT_MIN_DEFAULT,
+            )
+        ),
+        nbt_viewer_large_structure_threshold=int(
+            raw.get(
+                "nbt_viewer_large_structure_threshold",
+                NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT,
+            )
+        ),
     ).normalized()
 
 

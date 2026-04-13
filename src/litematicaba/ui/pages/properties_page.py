@@ -547,6 +547,27 @@ class PropertiesPage(QWidget):
         self._preview_count_hint.setText(f"PreviewImageData: {140 * 140} 项")
         self._mark_dirty()
 
+    def apply_render_as_preview(self, image: QImage) -> None:
+        """由「渲染」页将当前正交图裁成正方形并缩放到 140×140，写入内存预览并标记脏。"""
+        if image.isNull():
+            return
+        side = min(image.width(), image.height())
+        crop_x = (image.width() - side) // 2
+        crop_y = (image.height() - side) // 2
+        square = image.copy(crop_x, crop_y, side, side)
+        mode = self._preview_sample_combo.currentData()
+        if mode is None:
+            mode = Qt.TransformationMode.SmoothTransformation
+        self._preview_image = square.scaled(
+            140,
+            140,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            mode,
+        )
+        self._preview_canvas.set_preview(QPixmap.fromImage(self._preview_image))
+        self._preview_count_hint.setText(f"PreviewImageData: {140 * 140} 项")
+        self._mark_dirty()
+
     def _on_restore_defaults(self) -> None:
         """用 ``_baseline_snapshot`` 覆盖 ``_current_data`` 并刷新 UI。
 

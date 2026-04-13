@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QStyle, QStyleFactory
 from litematicaba.core.settings import DEFAULT_THEME, VALID_THEMES
 from litematicaba.ui.themes.base import ui_dir
 from litematicaba.ui.themes import THEMES
+from litematicaba.ui.themes.list_view_supplement import list_view_supplement_qss
 
 THEME_PROP = "_rdm_theme_id"
 
@@ -131,13 +132,20 @@ def theme_stylesheet(theme_id: str) -> str:
     builder = _THEME_BUILDERS.get(tid)
     if builder is None:
         return ""
-    return builder()
+    qss = builder()
+    extra = list_view_supplement_qss(tid)
+    if extra:
+        qss = qss.rstrip() + "\n" + extra + "\n"
+    return qss
 
 
 def apply_theme(app: QApplication | None, theme_id: str) -> None:
     if app is None:
         return
     tid = normalize_theme_id(theme_id)
+    prop = app.property(THEME_PROP)
+    if isinstance(prop, str) and normalize_theme_id(prop) == tid:
+        return
     _ensure_base_style(app)
     _ensure_theme_fonts(tid)
     app.setProperty(THEME_PROP, tid)

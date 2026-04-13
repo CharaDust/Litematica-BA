@@ -196,7 +196,13 @@ class _MaterialScanThread(QThread):
 class MaterialListDialog(QDialog):
     """非模态材料列表；依赖 ``PropertiesPage`` 获取当前激活路径。"""
 
-    def __init__(self, properties_page: PropertiesPage, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        properties_page: PropertiesPage,
+        parent: QWidget | None = None,
+        *,
+        initial_region_name: str | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("材料列表")
         self.setMinimumSize(560, 420)
@@ -255,6 +261,19 @@ class MaterialListDialog(QDialog):
         root.addWidget(self._table, 1)
 
         self._reload_from_context()
+        if initial_region_name:
+            self._select_workbook_region(initial_region_name)
+
+    def _select_workbook_region(self, name: str) -> None:
+        self._workbook.blockSignals(True)
+        idx = 0
+        for i in range(self._workbook.count()):
+            if self._workbook.itemData(i) == name:
+                idx = i
+                break
+        self._workbook.setCurrentIndex(idx)
+        self._workbook.blockSignals(False)
+        self._apply_workbook_selection(force_refresh=False)
 
     def _fill_region_items(self, region_keys: list[str]) -> None:
         self._workbook.blockSignals(True)
@@ -542,7 +561,16 @@ class MaterialListDialog(QDialog):
         QMessageBox.information(self, "写入文件", f"已保存到：\n{path}")
 
     @staticmethod
-    def open_for_properties(properties_page: PropertiesPage, parent: QWidget | None = None) -> MaterialListDialog:
-        dlg = MaterialListDialog(properties_page, parent)
+    def open_for_properties(
+        properties_page: PropertiesPage,
+        parent: QWidget | None = None,
+        *,
+        initial_region_name: str | None = None,
+    ) -> MaterialListDialog:
+        dlg = MaterialListDialog(
+            properties_page,
+            parent,
+            initial_region_name=initial_region_name,
+        )
         dlg.show()
         return dlg
