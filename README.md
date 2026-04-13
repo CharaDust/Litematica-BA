@@ -1,4 +1,4 @@
-![alt text](logo/logo_full.png)
+![alt text](logo/logo_full.png)   
 **简体中文** | [English](./README_EN.md)
 
 # Litematica Blueprint Assistant 投影蓝图助手
@@ -12,10 +12,10 @@
 
 
 
-源项目GITHUB链接: https://github.com/albertchen857/LitematicaViewer
-稳定版EXE文件右侧Resource下载
-最新(预览)版本PYTHON文件自行克隆 (如果发现问题请多多写写ISSUE谢谢)
-求求点点星吧 I want Stars~ target 100 stars
+源项目GITHUB链接: https://github.com/albertchen857/LitematicaViewer  
+稳定版EXE文件右侧Resource下载  
+最新(预览)版本PYTHON文件自行克隆 (如果发现问题请多多写写ISSUE谢谢)  
+求求点点星吧 I want Stars~ target 100 stars  
 
 一个轻量便捷的投影查看器
 
