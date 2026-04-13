@@ -45,6 +45,10 @@ from litematicaba.ui.content_display.list_table.drag_logic import (
 )
 from litematicaba.ui.theme import normalize_theme_id
 from litematicaba.ui.themes.base import ui_dir
+from litematicaba.ui.themes.list_view_supplement import (
+    mcmeta_table_row_hover_bg,
+    mcmeta_table_row_hover_fg_optional,
+)
 
 _METRO_ROW_H = 60
 _METRO_THUMB_PX = 40
@@ -59,6 +63,9 @@ _CONTENT_LIST_MIN_HEIGHT_PX = 400
 _METRO_HOVER_BG = QColor(0xE6, 0xE6, 0xE6)
 _METRO_SEL_BG = QColor(0xCC, 0xCC, 0xCC)
 _METRO_TEXT_FG = QColor(0, 0, 0)
+_MINECRAFT_LIST_HOVER_BG = mcmeta_table_row_hover_bg("Minecraft")
+_MINECRAFT_LIST_TEXT_FG = mcmeta_table_row_hover_fg_optional("Minecraft") or QColor("#ffffff")
+_MINECRAFT_LIST_SEL_BG = QColor("#5a922c")
 _METRO_TABLE_QSS = """
 QTableWidget { background-color: transparent; border: none; outline: none; }
 QTableWidget::item { background-color: transparent; border: none; outline: none; }
@@ -236,6 +243,49 @@ class _MetroContentListDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class _MinecraftContentListDelegate(QStyledItemDelegate):
+    """Minecraft：与操作表一致的黑底/斑马纹 + 行悬停 #2b2b2b、选中 #5a922c。"""
+
+    def __init__(self, table: "ContentListTableWidget", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._table = table
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # type: ignore[override]
+        if not self._table._column_is_text_data(index.column()):
+            return
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.palette.setColor(QPalette.ColorRole.Text, _MINECRAFT_LIST_TEXT_FG)
+        row = index.row()
+        sel = self._table.selectionModel().isRowSelected(row, QModelIndex())
+        hr = self._table._hover_row
+        if sel:
+            painter.save()
+            painter.setClipRect(opt.rect)
+            painter.fillRect(opt.rect, _MINECRAFT_LIST_SEL_BG)
+            painter.setPen(_MINECRAFT_LIST_TEXT_FG)
+            tr = opt.rect.adjusted(4, 0, -4, 0)
+            elided = QFontMetrics(opt.font).elidedText(
+                opt.text, Qt.TextElideMode.ElideRight, max(1, tr.width())
+            )
+            painter.drawText(tr, int(opt.displayAlignment), elided)
+            painter.restore()
+            return
+        if hr is not None and row == hr:
+            painter.save()
+            painter.setClipRect(opt.rect)
+            painter.fillRect(opt.rect, _MINECRAFT_LIST_HOVER_BG)
+            painter.setPen(_MINECRAFT_LIST_TEXT_FG)
+            tr = opt.rect.adjusted(4, 0, -4, 0)
+            elided = QFontMetrics(opt.font).elidedText(
+                opt.text, Qt.TextElideMode.ElideRight, max(1, tr.width())
+            )
+            painter.drawText(tr, int(opt.displayAlignment), elided)
+            painter.restore()
+            return
+        super().paint(painter, option, index)
+
+
 class ContentListTableWidget(QTableWidget):
     def __init__(self, rows: list[ContentRow], parent: QWidget | None = None, *, theme_id: str = "QTDefault") -> None:
         super().__init__(parent)
@@ -269,7 +319,10 @@ class ContentListTableWidget(QTableWidget):
             self.apply_sort(_SORT_FREE)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # type: ignore[override]
-        if obj is self.viewport() and _is_metro_list_theme(self._theme_id_normalized):
+        if obj is self.viewport() and (
+            _is_metro_list_theme(self._theme_id_normalized)
+            or self._theme_id_normalized == "Minecraft"
+        ):
             if event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
                 self._set_metro_hover_row(self.rowAt(int(event.position().y())))
             elif event.type() == QEvent.Type.Leave:
@@ -278,13 +331,24 @@ class ContentListTableWidget(QTableWidget):
 
     def _set_metro_hover_row(self, row: int | None) -> None:
         row = row if (row is not None and row >= 0) else None
-        if _is_metro_list_theme(self._theme_id_normalized) and row != self._hover_row:
+        if not (
+            _is_metro_list_theme(self._theme_id_normalized)
+            or self._theme_id_normalized == "Minecraft"
+        ):
+            return
+        if row != self._hover_row:
             self._hover_row = row
-            self._metro_apply_row_appearance()
+            self._sync_cell_widget_row_backgrounds()
 
     def _on_metro_selection_changed(self) -> None:
+        if _is_metro_list_theme(self._theme_id_normalized) or self._theme_id_normalized == "Minecraft":
+            self._sync_cell_widget_row_backgrounds()
+
+    def _sync_cell_widget_row_backgrounds(self) -> None:
         if _is_metro_list_theme(self._theme_id_normalized):
             self._metro_apply_row_appearance()
+        elif self._theme_id_normalized == "Minecraft":
+            self._minecraft_apply_row_appearance()
 
     def _metro_apply_row_appearance(self) -> None:
         if not _is_metro_list_theme(self._theme_id_normalized):
@@ -371,8 +435,31 @@ class ContentListTableWidget(QTableWidget):
                 self.resizeRowToContents(r)
         if placeholder_row is not None and 0 <= placeholder_row < self.rowCount():
             self.setRowHeight(placeholder_row, max(20, self._row_visual_height(placeholder_row)))
-        if _is_metro_list_theme(self._theme_id_normalized):
-            self._metro_apply_row_appearance()
+        if _is_metro_list_theme(self._theme_id_normalized) or self._theme_id_normalized == "Minecraft":
+            self._sync_cell_widget_row_backgrounds()
+
+    def _minecraft_apply_row_appearance(self) -> None:
+        if self._theme_id_normalized != "Minecraft":
+            return
+        selected_rows = {idx.row() for idx in self.selectionModel().selectedRows()}
+        for r in range(self.rowCount()):
+            is_sel = r in selected_rows
+            is_hov = self._hover_row is not None and r == self._hover_row and not is_sel
+            for c in ((0, 1) if self._sort_is_free_draggable() else (0,)):
+                w = self.cellWidget(r, c)
+                if w is None:
+                    continue
+                if is_sel:
+                    w.setStyleSheet(
+                        f"background-color: {_MINECRAFT_LIST_SEL_BG.name()}; border: none;"
+                    )
+                elif is_hov:
+                    w.setStyleSheet(
+                        f"background-color: {_MINECRAFT_LIST_HOVER_BG.name()}; border: none;"
+                    )
+                else:
+                    w.setStyleSheet("background-color: transparent; border: none;")
+        self.viewport().update()
 
     def _fill_placeholder_row(self, row_idx: int) -> None:
         for c in range(self.columnCount()):
@@ -496,6 +583,13 @@ class ContentListTableWidget(QTableWidget):
             self.viewport().setMouseTracking(True)
             self.setStyleSheet(_METRO_TABLE_QSS)
             self.setItemDelegate(_MetroContentListDelegate(self, self))
+        elif self._theme_id_normalized == "Minecraft":
+            self.setShowGrid(False)
+            self.setAlternatingRowColors(True)
+            self.setMouseTracking(True)
+            self.viewport().setMouseTracking(True)
+            self.setStyleSheet("")
+            self.setItemDelegate(_MinecraftContentListDelegate(self, self))
         else:
             self.setShowGrid(True)
             self.setMouseTracking(False)
@@ -549,14 +643,14 @@ class ContentListTableWidget(QTableWidget):
         lay.addStretch(1)
         lay.addWidget(lab, 0, Qt.AlignmentFlag.AlignCenter)
         lay.addStretch(1)
-        if _is_metro_list_theme(self._theme_id_normalized):
+        if _is_metro_list_theme(self._theme_id_normalized) or self._theme_id_normalized == "Minecraft":
             thumb_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             thumb_host.setStyleSheet("background-color: transparent; border: none;")
         texts = (row.name, row.time_display, row.size_display, row.extra1, row.extra2)
         if self._sort_is_free_draggable():
             drag = _DragSortHintWidget(self, row_idx)
             drag.setFixedWidth(_DRAG_SORT_COL_WIDTH)
-            if _is_metro_list_theme(self._theme_id_normalized):
+            if _is_metro_list_theme(self._theme_id_normalized) or self._theme_id_normalized == "Minecraft":
                 drag.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
                 drag.setStyleSheet("background-color: transparent; border: none;")
             self.setCellWidget(row_idx, 0, drag)

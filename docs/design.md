@@ -169,7 +169,7 @@ Regions: {
 | FR-S.5 | 图表区域 | 图表同样采用缓存优先 + 异步更新 | P1 |
 
 #### 2.4.3 旧项目统计指标算法（与 `script/LitematicaViewer.py` 对齐）
-以下公式与分支与旧查看器分析流程一致，便于新实现逐字复现。配置数据来自 `lang/setting.json` 的 `Category` 表；分类函数为 `script/Litmatool.py` 中的 `Category_Tran`。
+以下公式与分支与旧查看器分析流程一致，便于新实现逐字复现。配置数据来自 `lang/category.json`；分类函数为 `script/Litmatool.py` 中的 `Category_Tran`。
 
 **符号约定**
 
@@ -183,7 +183,7 @@ Regions: {
 
 1. 对 `Block` 中每个键 `val`（实体分支见下），取资源 ID 本地名：`id = val.split("[")[0].split(":")[-1]`（去掉 SNBT 属性段与命名空间）。
 2. 若 `val` 以 `E/` 开头，归入 **实体**。
-3. 否则调用 `Category_Tran(id)`：将 `id` 按下划线 `_` 拆成若干段，按 `setting.json` 中 `Category` 的**对象键顺序**依次遍历每个大类及其关键词列表；若任一段字符串**等于**列表中某项，则返回该大类中文名；若无匹配返回空串，方块计入 **其他**。
+3. 否则调用 `Category_Tran(id)`：将 `id` 按下划线 `_` 拆成若干段，按 `category.json` 的**对象键顺序**依次遍历每个大类及其关键词列表；若任一段字符串**等于**列表中某项，则返回该大类中文名；若无匹配返回空串，方块计入 **其他**。
 4. 「红石偏度」分子用到的计数 = 大类 **红石** 中所有 `(次数, id)` 的 `次数` 之和 + 大类 **容器** 中同样之和。
 
 **密度（界面「密度」/`a_den`）**
@@ -237,7 +237,7 @@ $$
 
 - 统计主流程：`script/LitematicaViewer.py` 中 `start_analysis`（`num`、`Block`、`a_den`、`redly`、`fluid`、`me_type` 等）。
 - 分类：`script/Litmatool.py` 中 `Category_Tran`。
-- 关键词表：`lang/setting.json` → `Category`（含「红石」「容器」「液体」等列表）。
+- 关键词表：`lang/category.json`（含「红石」「容器」「液体」等列表）。
 
 ---
 ### 2.5 模块五：层级展示（Flake）
@@ -431,6 +431,12 @@ $$
 | FR-I18N.1 | 语言包加载 | 启动加载默认语言 JSON | P1 |
 | FR-I18N.2 | 运行时切换 | 切换语言后刷新 UI 文本 | P1 |
 | FR-I18N.3 | 回退机制 | 缺失翻译键时回退默认语言 | P1 |
+
+语言资源目录约定（实现）：
+
+- 内置语言源文件拆分为：`lang/zh_cn.json`（Minecraft 标准语言键）与 `lang/category.json`（分类关键词）。
+- 首次运行时将内置语言复制到：`data/minecraft-assets/language/initial/`；后续运行时内置语言读取以该目录为准。
+- 外部下载语言按来源分目录存储，`github/InventivetalentDev` 来源写入：`data/minecraft-assets/language/github/InventivetalentDev/<branch>/<lang>.json`，避免跨来源重复命名冲突。
 ---
 ## 3. 非功能性需求
 ### 3.1 性能需求

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CLI：下载 misode/mcmeta 至 ``data/minecraft-assets/nbt-viewer/<版本 id>/mcmeta``。
 
-逻辑在 ``litematicaba.core.nbt_mcmeta_fetch``，与选项页「管理游戏资源版本」一致。
+逻辑在 ``litematicaba.core.nbt_mcmeta_fetch``，与选项页「管理游戏资源」一致。
 """
 
 from __future__ import annotations
