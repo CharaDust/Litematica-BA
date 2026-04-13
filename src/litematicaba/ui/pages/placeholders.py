@@ -194,20 +194,6 @@ class PropertiesPage(QWidget):
         root.addWidget(_empty_page("属性（Properties）", "占位：SNBT 元数据读写将在后续实现。"))
 
 
-class FlakePage(QWidget):
-    def __init__(self) -> None:
-        super().__init__()
-        root = QVBoxLayout(self)
-        root.addWidget(_empty_page("分层（Flake）", "占位：分层平面渲染将在后续实现。"))
-
-
-class RenderPage(QWidget):
-    def __init__(self) -> None:
-        super().__init__()
-        root = QVBoxLayout(self)
-        root.addWidget(_empty_page("渲染（Render）", "占位：区域渲染与导出将在后续实现。"))
-
-
 class ReplacePage(QWidget):
     def __init__(self) -> None:
         super().__init__()

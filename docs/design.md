@@ -4,6 +4,9 @@
 | V1.0 | 2026-04-10 | CharaDust | 初稿创建，按参考项目文档结构编写 |
 | V1.1 | 2026-04-11 | CharaDust | 补充属性页区域列表（Line.5）设计与 SNBT 映射 |
 | V1.2 | 2026-04-11 | CharaDust | 补充旧项目（`script/`）统计指标：红石偏度、材质、液体偏度、密度算法 |
+| V1.3 | 2026-04-12 | CharaDust | 渲染方案：以 Deepslate（内嵌 WebView）为主路径，`legacy` 为备选并持续迭代；新增 **2.6.3** 技术说明 |
+| V1.4 | 2026-04-12 | CharaDust | 明确 Deepslate 非每次启动从 GitHub 拉代码；选项页增加渲染组件更新相关项（**2.0.4**、**2.6.3.9**） |
+| V1.5 | 2026-04-13 | CharaDust | Render「完整入镜导出」参数配置化：新增选项项与默认值提示，区分透视/正交公式并写入设置（**2.0.4**、**2.6.3.6**、**2.6.3.10**） |
 ---
 ## 1. 项目概述
 ### 1.1 项目名称
@@ -43,6 +46,15 @@
 | 导航切换 | 点击左侧入口切换右侧页面，更新激活态 | P0 |
 | 活动文件 | “属性”中激活文件作为其他模块默认活动文件 | P0 |
 | 切换保护 | 切换激活文件时若未保存，弹窗确认 | P0 |
+#### 2.0.4 选项页（Settings / Options）
+| 编号 | 功能点 | 描述 | 优先级 |
+|------|--------|------|--------|
+| FR-O.1 | 界面与主题 | 主题等通用外观设置 | P0 |
+| FR-O.2 | 调试与侧栏 | UI 测试入口、控件信息、磁贴网格等 | P1 |
+| FR-O.3 | Deepslate 更新说明 | 选项内说明：**Deepslate 在构建时打包，启动默认不从 GitHub 下载源码** | P1 |
+| FR-O.4 | 启动时检查渲染组件 | 开关项 `deepslate_check_updates_on_startup`（默认关）；在**独立渲染资源包更新源**就绪后，可在启动时联网检查（与 npm/GitHub 源码拉取无关） | P2 |
+| FR-O.5 | 手动检查渲染组件 | 按钮「立即检查渲染组件更新」：当前版本提示策略与完整应用升级路径；将来可改为拉取清单并下载差分包 | P2 |
+| FR-O.6 | NBT 完整入镜导出参数 | 提供「NBT 3D — 完整入镜导出（导出…）」参数组；参数持久化到 `settings.json`，控件提示需注明内置默认值；参数调整后对后续导出立即生效 | P1 |
 ---
 ### 2.1 模块一：主页（Home）
 #### 2.1.1 功能描述
@@ -238,12 +250,12 @@ $$
 | FR-F.2 | 子区域下拉 | 多子区域时可选择显示子区域 | P1 |
 | FR-F.3 | 默认区域策略 | 默认显示第一个区域；可配置默认显示全部区域 | P1 |
 | FR-F.4 | 材料列表 | 右侧按钮打开当前层级约束下材料列表 | P1 |
-| FR-F.5 | 渲染方案 | 首版提供“遗赠（legacy）” | P1 |
+| FR-F.5 | 渲染方案 | **主路径：`Deepslate`（内嵌 WebView）**；`legacy` 为 **二维图像 / 平面切片** 渲染（非体素 3D），持续改进性能与画质 | P1 |
 | FR-F.6 | 层级控制 | 横向单手柄滑条控制显示层级 | P1 |
 ---
 ### 2.6 模块六：区域渲染（Render）
 #### 2.6.1 功能描述
-基于激活文件进行整体模型渲染，生成并输出缩略图。
+基于激活文件进行整体模型渲染，生成并输出缩略图。**首版以 Deepslate + 内嵌 WebView 为主渲染路径**（与社区成熟工具同源技术栈，画质与可维护性优于旧版体素渲染）；`legacy` 作为备选或离线降级方案，在后续里程碑中持续改进性能与观感。
 #### 2.6.2 功能点
 | 编号 | 功能点 | 描述 | 优先级 |
 |------|--------|------|--------|
@@ -251,9 +263,98 @@ $$
 | FR-R.2 | 子区域下拉 | 多区域时支持切换显示区域 | P1 |
 | FR-R.3 | 默认区域策略 | 默认第一个区域；可配置默认全部区域 | P1 |
 | FR-R.4 | 材料列表 | 显示当前选定区域材料列表 | P1 |
-| FR-R.5 | 渲染方案 | `legacy` / `EndingCredits' Litematic Viewer` / `NBT Viewer` | P1 |
+| FR-R.5 | 渲染方案 | **`Deepslate`（默认）**：内嵌浏览器 + WebGL；**`legacy`**：项目内旧 OpenGL 体素逻辑，持续迭代 | P1 |
 | FR-R.6 | 方向控制 | 9 按钮方向控制（顶视 + 东南西北 + 4 个 45 度俯视） | P1 |
 | FR-R.7 | 输出按钮 | 写入预览图、导出缩略图 | P1 |
+#### 2.6.3 渲染技术方案：Deepslate（主路径）
+本节约定宿主（Python/Qt）与前端（打包后的 JS）如何协同，便于实现与验收对齐社区实践（如 [misode/vscode-nbt](https://github.com/misode/vscode-nbt)）。
+
+##### 2.6.3.1 技术栈与职责划分
+| 层级 | 选型 | 职责 |
+|------|------|------|
+| 渲染核心 | [Deepslate](https://www.npmjs.com/package/deepslate)（版本在构建中锁定） | NBT/结构抽象、`Structure` / `StructureProvider`、`StructureRenderer`、方块模型与纹理图集消费（WebGL） |
+| 数学库 | `gl-matrix` | 视图矩阵、投影矩阵；与 Deepslate 及 vscode-nbt 用法一致 |
+| 宿主 UI | Qt `QWebEngineView`（或同等级 WebView2/WebKit 封装） | 加载本地静态页、安全策略、与业务层桥接 |
+| 备选 | `legacy`（`script/LitRender.py` 等迁移路径） | 无可用 GPU/WebView、用户显式选择或开发调试时的回退 |
+
+##### 2.6.3.2 前端资产与构建
+- 将 **Deepslate**、**gl-matrix** 与**薄封装**（`.litematic` → 与 Deepslate 兼容的结构对象，逻辑可对齐 vscode-nbt 的 `Schematics.ts` / `litematicToStructure`）通过 **Rollup / Vite** 等打包为静态资源（如 `resources/renderer/`），随安装包分发。
+- **不在运行时依赖** npm 或 VS Code；仅使用打包后的 JS 与资源文件。
+
+##### 2.6.3.3 Minecraft 资源与数据版本
+- Deepslate 绘制依赖 **方块状态（blockstates）**、**模型（models）**、**纹理图集**及 **UV 映射**，须与投影文件的 **Minecraft 数据版本**（属性页只读字段）一致或兼容。
+- 建议缓存目录：`data/render_assets/<数据版本>/`（或等价结构），可借鉴 vscode-nbt 的下载/缓存思路；**缺失资源时**应提示用户并允许回退 `legacy`，而非静默错模。
+
+##### 2.6.3.4 宿主 ↔ WebView 数据通道
+| 方式 | 适用 | 说明 |
+|------|------|------|
+| 路径 + 本地只读打开 | 开发期、受控环境 | 将激活文件绝对路径传入 JS；需在 WebView 中允许访问本地文件或使用自定义 scheme，注意 Windows 路径与打包路径 |
+| 二进制 / JSON 注入 | 推荐生产默认 | 宿主读取 `.litematic`，经 **`QWebChannel`**、`runJavaScript` 或 `postMessage` 将 **ArrayBuffer** 或 **NBT 树 JSON** 传入页面，由 Deepslate 侧解析为 `NbtFile` / `Structure`，避免前端任意读盘 |
+| 子区域切换 | 与 FR-R.2 对齐 | 可只传当前子区域对应 NBT 子树或预裁剪结构，降低单次 GPU/内存压力 |
+
+##### 2.6.3.5 相机预设与 FR-R.6
+- 预设基于 `StructureEditor` 轨道参数定义：`cRot[0]=yaw`（绕 Y）、`cRot[1]=pitch`（绕 X），视图矩阵顺序为 `T(0,0,-cDist) * Rx(cRot[1]) * Ry(cRot[0]) * T(cPos)`；绘制循环调用 Deepslate 的 `StructureRenderer` 入口（思路同 vscode-nbt `StructureEditor`）。
+- 9 个方向按钮与预设一一绑定；按钮为**瞬时触发**而非“保持选中态”，用户手动拖拽改变相机后可再次点击同一方向，强制重新应用该预设。
+- NBT 3D 在**首次加载**与**重新加载 3D**完成后，统一恢复默认轨道相机（与 `StructureEditor` 初始化一致）：`cRot=(0.4, 0.6)`，并按 `onInit` 规则重算 `cPos/cDist`；FOV 仍由 FOV 滑块值决定。
+- 交互式旋转/缩放可在页内实现；导出缩略图时使用与按钮一致的预设矩阵以保证输出稳定、可复现。
+
+预设角（弧度）定义：
+
+| 方向 | `cRot[0]`（yaw） | `cRot[1]`（pitch） |
+|---|---|---|
+| 顶视 | `0` | `π/2` |
+| 北 | `π` | `0` |
+| 南 | `0` | `0` |
+| 西 | `π/2` | `0` |
+| 东 | `-π/2` | `0` |
+| 西北 | `atan2(sx, -sz)` | `atan2(sy, hypot(sx, sz))` |
+| 东北 | `atan2(-sx, -sz)` | `atan2(sy, hypot(sx, sz))` |
+| 西南 | `atan2(sx, sz)` | `atan2(sy, hypot(sx, sz))` |
+| 东南 | `atan2(-sx, sz)` | `atan2(sy, hypot(sx, sz))` |
+
+其中 `sx/sy/sz` 为结构尺寸 `getSize()` 的三个轴向分量；四个对角方向共用同一 `pitch`，仅 `yaw` 象限不同。
+
+##### 2.6.3.6 缩略图与预览图（FR-R.7）
+- 从 WebView 内 **离屏或当前 `canvas`** 导出：`canvas.toDataURL('image/png')` 或通过桥接回传 **PNG 字节流**；宿主负责写入文件内 `PreviewImageData` 或导出到用户路径。
+- 分辨率与宽高比需在文档或设置中约定（例如与属性页预览图 140×140 策略协调）。
+- 当前实现将输出拆分为两种动作：**截屏**（当前视口）与**导出**（完整入镜）；两者均先给出预览，再由用户选择“保存为 PNG”或“写入预览图”。
+- NBT「导出」路径不修改 `canvas` 尺寸、不调用 `resize()`，仅临时调整相机参数后在当前画布导出，避免 WebGL 资源重置导致空白图。
+
+##### 2.6.3.7 性能、体积与超大结构
+- 参考 vscode-nbt：对 **超大体积**（如超过约 $48^3$ 体素）可 **警告后继续** 或 **关闭高成本特性**（如不可见块相关 Pass）；本软件可额外采用 **仅加载当前子区域**、**降采样** 或 **进度条**（对齐 NFR-1.4）。
+- 资源包建议 **按需懒加载**，首次进入渲染页显示加载进度。
+
+##### 2.6.3.8 安全与回退
+- 页面脚本与资源均来自 **应用内本地路径**；禁止执行远程任意脚本。
+- **WebGL 初始化失败**、驱动黑名单或资源版本不匹配时：明确错误提示，并 **自动或手动回退 `legacy`**；设置项可提供「固定使用 Deepslate / legacy / 自动」。
+
+##### 2.6.3.9 启动行为与「更新 Deepslate」
+- **不会在每次启动时从 GitHub 下载 Deepslate 源码**：与 [vscode-nbt](https://github.com/misode/vscode-nbt) 类似，Deepslate 为 **npm 依赖，在构建阶段打入静态 JS**，随安装包分发。
+- **可能联网的场景**（与「Deepslate 代码」区分）：**Minecraft 方块资源**（blockstates / models / 图集等）可在首次使用或版本切换时 **下载并缓存在本地**（如 `data/render_assets/`），不应在无操作时静默高频请求。
+- **用户可控更新**：在 **选项** 中提供「启动时检查渲染组件更新」（默认关闭，待更新源定义后实现）与 **手动「检查渲染组件更新」**（见 **§2.0.4 FR-O.4 / FR-O.5**）。若将来提供独立于主程序的渲染资源包，通过清单 URL 比对版本并下载；**升级主程序**仍是获取新构建内嵌 Deepslate 修订的主要方式。
+
+##### 2.6.3.10 NBT「完整入镜导出」参数化（透视/正交）
+- 目标：在保持当前旋转（`cRot`）与当前画布分辨率的前提下，使结构尽量完整入镜；参数可在选项页调整并持久化。
+- 宿主（Python）将设置项注入页面全局对象 `window.__lbaExportFullParams`；前端导出函数读取后参与距离估算。
+- 若注入缺失或值非法，前端必须回退到内置默认值，保证导出行为稳定可预测。
+
+参数定义（默认值）：
+
+| 设置键 | 作用公式 | 默认值 |
+|---|---|---|
+| `nbt_export_full_margin` | `r = diag * 0.5 * margin`（共用入镜边距） | `1.22` |
+| `nbt_export_full_perspective_min_distance` | 透视距离下限 `max(minDist, ...)` | `6.0` |
+| `nbt_export_full_perspective_diag_extra` | 透视附加项 `+ diag * diagExtra` | `0.12` |
+| `nbt_export_full_orthographic_need_half_padding` | 正交半高需求 `needHalfH = r + padding` | `1.0` |
+| `nbt_export_full_orthographic_height_scale` | 正交换算 `cDist = needHalfH / scale + ...` 与 `orthoHalfHeight = cDist * scale` | `0.38` |
+| `nbt_export_full_orthographic_diag_extra` | 正交附加项 `+ diag * diagExtra` | `0.15` |
+| `nbt_export_full_orthographic_min_distance` | 正交距离下限 `max(minDist, ...)` | `12.0` |
+| `nbt_export_full_orthographic_half_height_min` | 正交投影半高下限 `max(cDist * scale, halfHeightMin)` | `2.5` |
+
+实现约束：
+- 仅 NBT Viewer 的「导出…」使用该参数集；Deepslate 回退页可后续按同语义补齐。
+- UI 中每个参数控件需通过提示文案展示“默认值”，便于用户按默认配置回退与调参对照。
+
 ---
 ### 2.7 模块七：方块替换（Replace）
 #### 2.7.1 功能描述
@@ -351,12 +452,6 @@ $$
 | NFR-3.1 | 切换保护 | 切换活动文件前必须处理未保存确认 |
 | NFR-3.2 | 缓存容错 | 缓存损坏或缺失不影响主流程 |
 | NFR-3.3 | 可携目录 | 持久化目录位于程序同级 `data/` |
-### 3.3 可靠性需求
-| 编号 | 需求 | 说明 |
-|------|------|------|
-| NFR-3.1 | 切换保护 | 切换活动文件前必须处理未保存确认 |
-| NFR-3.2 | 缓存容错 | 缓存损坏或缺失不影响主流程 |
-| NFR-3.3 | 可携目录 | 持久化目录位于程序同级 `data/` |
 ### 3.4 可用性需求
 | 编号 | 需求 | 说明 |
 |------|------|------|
@@ -404,7 +499,7 @@ $$
 | UI 层 | 导航、表单、渲染视图、异步状态展示 |
 | 业务层 | 激活文件上下文、SNBT 读写、统计与渲染调度 |
 | 数据层 | 文件系统访问、设置管理、缓存管理 |
-| 适配层 | legacy 与外部渲染方案适配 |
+| 适配层 | **Deepslate WebView 桥接**（路径/二进制/JSON 注入、截图回传）与 **legacy** 渲染适配 |
 ### 5.2 关键约束
 1. 文件解析、统计与渲染必须异步化，避免阻塞 UI。  
 2. “属性（Properties）”是活动文件管理主入口。  
@@ -415,14 +510,16 @@ $$
 |------|------|----------|
 | Phase 1 | 核心闭环 | 投影库 + 属性读写 + 活动文件联动 |
 | Phase 2 | 分析能力 | 统计分析 + 材料列表缓存 |
-| Phase 3 | 可视化能力 | 分层与区域渲染 + 方向控制 + 缩略图导出 |
+| Phase 3 | 可视化能力 | 分层与区域渲染（**Render 以 Deepslate 为主**）+ 方向控制 + 缩略图导出；`legacy` 并行改进 |
 | Phase 4 | 增强功能 | 方块替换 + i18n 完善 + 渲染方案扩展 |
 ---
 ## 7. 风险与应对
 | 风险 | 影响 | 概率 | 应对措施 |
 |------|------|------|----------|
 | 大文件解析耗时 | 中 | 高 | 异步解析 + 缓存 + 进度提示 |
-| 多渲染方案行为不一致 | 中 | 中 | 统一渲染接口，按方案适配 |
+| 多渲染方案行为不一致 | 中 | 中 | 统一渲染接口（数据源一致），Deepslate / legacy 分别适配；导出分辨率策略写死或配置化 |
+| WebView / WebGL 环境差异 | 中 | 中 | 检测 GPU 与 WebGL；失败时回退 `legacy` 并记录日志 |
+| 渲染资源与数据版本错配 | 中 | 中 | 按 `mc_data_version` 选用资源包；缺失时提示下载/切换版本 |
 | 缓存过期导致误读 | 中 | 中 | 时间戳校验 + 灰色缓存标识 + 后台刷新 |
 | 版本兼容问题（非 v5） | 中 | 中 | 解析层按版本分支并保留降级提示 |
 ---
@@ -435,6 +532,7 @@ $$
 | 缩略图 | 软件渲染输出的 PNG 图像（渲染图） |
 | 子区域 | 投影文件中可单独选择渲染/统计的区域单元 |
 ### 8.2 参考资源
+- [Deepslate（npm）](https://www.npmjs.com/package/deepslate)
 - [EndingCredits/litematic-viewer](https://github.com/EndingCredits/litematic-viewer)
-- [misode/vscode-nbt](https://github.com/misode/vscode-nbt)
+- [misode/vscode-nbt](https://github.com/misode/vscode-nbt)（WebView + Deepslate + `litematicToStructure` 集成参考）
 ---

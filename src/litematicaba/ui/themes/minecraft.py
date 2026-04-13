@@ -17,6 +17,8 @@ _INPUT_OUTER_HEIGHT = 44
 _INPUT_BORDER_PX = 2
 _INPUT_PAD_V = 4
 _INPUT_PAD_H = 8
+# 列表行高约定（与输入框外高 44px 对齐）；QComboBox 下拉行高待定，不单独写 QSS。
+_LIST_ITEM_ROW_HEIGHT_PX = 44
 
 
 def build_qss() -> str:
@@ -25,6 +27,14 @@ def build_qss() -> str:
     bh = qss_url(d / "button_hover_min.png")
     bc = qss_url(d / "button_check_min.png")
     bd = qss_url(d / "button_disabled_min.png")
+    radio_mc_default = qss_url(d / "radio_default.png")
+    radio_mc_hover = qss_url(d / "radio_hover.png")
+    radio_mc_checked = qss_url(d / "radio_checked.png")
+    radio_mc_checked_hover = qss_url(d / "radio_checked_hover.png")
+    checkbox_mc_default = qss_url(d / "checkbox_default.png")
+    checkbox_mc_hover = qss_url(d / "checkbox_hover.png")
+    checkbox_mc_checked = qss_url(d / "checkbox_checked.png")
+    checkbox_mc_checked_hover = qss_url(d / "checkbox_checked_hover.png")
     s = _BTN_SLICE
     border_v = 2 * s
     pad_v = 2 * _BTN_PAD_V
@@ -64,6 +74,12 @@ def build_qss() -> str:
         background-color: #2b2b2b;
     }}
     QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 4px; }}
+
+    QListWidget::item,
+    QTreeView::item,
+    QTableView::item {{
+        min-height: {_LIST_ITEM_ROW_HEIGHT_PX}px;
+    }}
 
     QPushButton, QToolButton {{
         background-color: transparent;
@@ -159,6 +175,26 @@ def build_qss() -> str:
     QAbstractSpinBox::up-button:hover:enabled, QAbstractSpinBox::down-button:hover:enabled {{
         background-color: #2a2a2a;
     }}
+
+    QRadioButton::indicator {{
+        width: 20px; height: 20px;
+        border: none;
+        background: transparent;
+        image: url("{radio_mc_default}");
+    }}
+    QRadioButton::indicator:hover:enabled {{ image: url("{radio_mc_hover}"); }}
+    QRadioButton::indicator:checked {{ image: url("{radio_mc_checked}"); }}
+    QRadioButton::indicator:checked:hover:enabled {{ image: url("{radio_mc_checked_hover}"); }}
+    QCheckBox::indicator {{
+        width: 20px; height: 20px;
+        border: none;
+        background-color: transparent;
+        image: url("{checkbox_mc_default}");
+    }}
+    QCheckBox::indicator:hover:enabled {{ image: url("{checkbox_mc_hover}"); }}
+    QCheckBox::indicator:checked {{ image: url("{checkbox_mc_checked}"); }}
+    QCheckBox::indicator:checked:hover:enabled {{ image: url("{checkbox_mc_checked_hover}"); }}
+
     QSlider::groove:horizontal {{ height: 8px; background: #555555; border-radius: 0; }}
     QSlider::handle:horizontal {{
         width: 12px; height: 18px; margin: -5px 0;

@@ -76,6 +76,10 @@ def _is_metro_list_theme(theme_id: str) -> bool:
 # 供属性页等「纯文本数据表」与内容物列表共用同一套 Metro 扁平表 QSS / 行高约定
 METRO_LIST_TABLE_CHROME_QSS = _METRO_TABLE_QSS
 METRO_LIST_SAMPLE_ROW_HEIGHT = _METRO_ROW_H
+# 供资源管理等表格与内容列表对齐 Metro 行悬停/文本色（与 _MetroPlainDelegate 一致）
+METRO_LIST_ROW_HOVER_COLOR = _METRO_HOVER_BG
+METRO_LIST_ROW_SELECTED_COLOR = _METRO_SEL_BG
+METRO_LIST_ROW_TEXT_COLOR = _METRO_TEXT_FG
 
 
 def is_metro_list_table_theme(theme_id: str) -> bool:
