@@ -4,34 +4,30 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt, QThread, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QStyledItemDelegate,
-    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from litematicaba.ui.content_display.list_table.view import (
-    METRO_LIST_ROW_HOVER_COLOR,
-    METRO_LIST_ROW_TEXT_COLOR,
-)
 from litematicaba.ui.theme import current_theme_id
-from litematicaba.ui.themes.list_view_supplement import (
-    mcmeta_version_table_list_row_height_px,
-    mcmeta_version_table_min_height_px,
+from litematicaba.ui.widgets.mcmeta_standard_table import (
+    OBJ_MCMETA_STANDARD_APPLY_BTN,
+    OBJ_MCMETA_STANDARD_OP_BTN,
+    McmetaStandardTableCellHost,
+    McmetaStandardTableRowHoverController,
+    apply_mcmeta_standard_table_row_heights,
+    configure_mcmeta_standard_action_table,
+    mcmeta_standard_wrap_action_button,
 )
 
 from litematicaba.core.nbt_mcmeta_fetch import (
@@ -45,75 +41,8 @@ from litematicaba.core.nbt_mcmeta_fetch import (
 )
 from litematicaba.core.nbt_viewer_bundle import mcmeta_dir_complete
 
-_OBJ_APPLY_BTN = "McmetaCellApplyBtn"
-_OBJ_OP_BTN = "McmetaCellOpBtn"
-
-
-class _McmetaMetro10CellHost(QWidget):
-    """Metro10 下按钮格：仅用 paintEvent 铺底色响应行悬停，不套 QSS，避免改按钮外观。"""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._hover_highlight = False
-
-    def set_hover_highlight(self, on: bool) -> None:
-        if self._hover_highlight == on:
-            return
-        self._hover_highlight = on
-        self.update()
-
-    def paintEvent(self, event) -> None:  # type: ignore[override]
-        p = QPainter(self)
-        if self._hover_highlight:
-            p.fillRect(self.rect(), METRO_LIST_ROW_HOVER_COLOR)
-        else:
-            p.fillRect(self.rect(), QColor("#ffffff"))
-        p.end()
-
-
-def _wrap_button_centered(btn: QPushButton, *, metro10_hover_cell: bool = False) -> QWidget:
-    """表格单元格内按钮水平、垂直居中。"""
-    host: QWidget = _McmetaMetro10CellHost() if metro10_hover_cell else QWidget()
-    outer = QVBoxLayout(host)
-    outer.setContentsMargins(0, 0, 0, 0)
-    outer.setSpacing(0)
-    outer.addStretch(1)
-    mid = QHBoxLayout()
-    mid.setContentsMargins(0, 0, 0, 0)
-    mid.addStretch(1)
-    mid.addWidget(btn, 0, Qt.AlignmentFlag.AlignCenter)
-    mid.addStretch(1)
-    outer.addLayout(mid)
-    outer.addStretch(1)
-    return host
-
-
-class _McmetaMetro10FirstColumnDelegate(QStyledItemDelegate):
-    """与 UI 测试页 ``ContentListTableWidget`` / ``ThemedPlainQTableWidget`` 第一列绘制一致：无斑马纹、悬停 #E6E6E6。"""
-
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # type: ignore[override]
-        if index.column() != 0:
-            super().paint(painter, option, index)
-            return
-        parent = self.parent()
-        if not isinstance(parent, QTableWidget):
-            super().paint(painter, option, index)
-            return
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-        hr = getattr(parent, "_mcmeta_metro_hover_row", None)
-        row = index.row()
-        painter.save()
-        painter.setClipRect(opt.rect)
-        if hr is not None and row == hr:
-            painter.fillRect(opt.rect, METRO_LIST_ROW_HOVER_COLOR)
-        painter.setPen(METRO_LIST_ROW_TEXT_COLOR)
-        tr = opt.rect.adjusted(4, 0, -4, 0)
-        elided = QFontMetrics(opt.font).elidedText(
-            opt.text, Qt.TextElideMode.ElideRight, max(1, tr.width())
-        )
-        painter.drawText(tr, int(opt.displayAlignment), elided)
-        painter.restore()
+_OBJ_APPLY_BTN = OBJ_MCMETA_STANDARD_APPLY_BTN
+_OBJ_OP_BTN = OBJ_MCMETA_STANDARD_OP_BTN
 
 
 class _McmetaCatalogWorker(QThread):
@@ -165,7 +94,7 @@ class McmetaVersionPickerDialog(QDialog):
         self._fetch_worker: _McmetaFetchWorker | None = None
         self._fetch_busy = False
         self._aborted = False
-        self._metro10_chrome = False
+        self._hover_ctrl: McmetaStandardTableRowHoverController | None = None
 
         lay = QVBoxLayout(self)
         hint = QLabel(
@@ -186,34 +115,11 @@ class McmetaVersionPickerDialog(QDialog):
         lay.addLayout(filter_row)
 
         self._table = QTableWidget()
-        self._table.setObjectName("McmetaVersionTable")
-        self._table.setColumnCount(3)
-        self._table.setHorizontalHeaderLabels(["版本", "", ""])
-        self._table.setShowGrid(False)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setEditTriggers(self._table.EditTrigger.NoEditTriggers)
-        self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
-        self._table.setAutoScroll(False)
-        hh = self._table.horizontalHeader()
-        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(1, 72)
-        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(2, 72)
         app = QApplication.instance()
         tid = current_theme_id(app if isinstance(app, QApplication) else None)
-        self._metro10_chrome = tid == "Metro10"
-        if self._metro10_chrome:
-            self._table._mcmeta_metro_hover_row = None  # type: ignore[attr-defined]
-            self._table.setAlternatingRowColors(False)
-            self._table.setItemDelegate(_McmetaMetro10FirstColumnDelegate(self._table))
-            self._table.setMouseTracking(True)
-            self._table.viewport().setMouseTracking(True)
-            self._table.viewport().installEventFilter(self)
-        else:
-            self._table.setAlternatingRowColors(True)
-        self._table.setMinimumHeight(mcmeta_version_table_min_height_px(tid))
+        self._hover_ctrl = configure_mcmeta_standard_action_table(
+            self._table, tid, column_labels=("版本", "", "")
+        )
         self._apply_mcmeta_table_row_heights()
         lay.addWidget(self._table, 1)
 
@@ -226,40 +132,10 @@ class McmetaVersionPickerDialog(QDialog):
 
         self._start_catalog_load()
 
-    def _metro10_set_hover_row(self, row: int | None) -> None:
-        if not self._metro10_chrome:
-            return
-        row = row if row is not None and row >= 0 else None
-        if row == getattr(self._table, "_mcmeta_metro_hover_row", None):
-            return
-        self._table._mcmeta_metro_hover_row = row  # type: ignore[attr-defined]
-        for r in range(self._table.rowCount()):
-            for c in (1, 2):
-                host = self._table.cellWidget(r, c)
-                if isinstance(host, _McmetaMetro10CellHost):
-                    host.set_hover_highlight(row is not None and r == row)
-        self._table.viewport().update()
-
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # type: ignore[override]
-        if self._metro10_chrome and obj is self._table.viewport():
-            if event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
-                r = self._table.rowAt(int(event.position().y()))
-                self._metro10_set_hover_row(r if r >= 0 else None)
-            elif event.type() == QEvent.Type.Leave:
-                self._metro10_set_hover_row(None)
-        return super().eventFilter(obj, event)
-
     def _apply_mcmeta_table_row_heights(self) -> None:
-        """QTableWidget 行高需代码设置；与主题列表约定一致（见 list_view_supplement.MCMETA_TABLE_ROW_HEIGHT_PX_BY_THEME）。"""
         app = QApplication.instance()
         tid = current_theme_id(app if isinstance(app, QApplication) else None)
-        h = mcmeta_version_table_list_row_height_px(tid)
-        if h is None:
-            return
-        vh = self._table.verticalHeader()
-        vh.setDefaultSectionSize(h)
-        for r in range(self._table.rowCount()):
-            self._table.setRowHeight(r, h)
+        apply_mcmeta_standard_table_row_heights(self._table, tid)
 
     def _start_catalog_load(self) -> None:
         self._catalog_worker = _McmetaCatalogWorker()
@@ -284,8 +160,8 @@ class McmetaVersionPickerDialog(QDialog):
             self._rows.append((line, e.id, e.id))
 
     def _refresh_table_body(self) -> None:
-        if self._metro10_chrome:
-            self._table._mcmeta_metro_hover_row = None  # type: ignore[attr-defined]
+        assert self._hover_ctrl is not None
+        self._table._mcmeta_hover_row = None  # type: ignore[attr-defined]
         self._build_rows()
         self._table.setRowCount(len(self._rows))
         for i, (label, fetch_spec, folder_id) in enumerate(self._rows):
@@ -302,12 +178,11 @@ class McmetaVersionPickerDialog(QDialog):
                 apply_btn.setChecked(folder_id.strip() == self._applied_version.strip())
                 apply_btn.clicked.connect(lambda _c=False, fd=folder_id: self._on_apply(fd))
                 self._table.setCellWidget(
-                    i, 1, _wrap_button_centered(apply_btn, metro10_hover_cell=self._metro10_chrome)
+                    i, 1, mcmeta_standard_wrap_action_button(apply_btn, self._table, i, self._hover_ctrl)
                 )
             else:
-                # Metro10：无「应用」时也要占位控件，否则该格无 _McmetaMetro10CellHost，悬停行无法铺灰底
                 self._table.setCellWidget(
-                    i, 1, _McmetaMetro10CellHost() if self._metro10_chrome else None
+                    i, 1, McmetaStandardTableCellHost(self._table, i, self._hover_ctrl)
                 )
 
             op_btn = QPushButton("清除" if installed else "下载")
@@ -315,11 +190,10 @@ class McmetaVersionPickerDialog(QDialog):
             op_btn.setEnabled(not self._fetch_busy)
             op_btn.clicked.connect(lambda _c=False, fd=folder_id, fs=fetch_spec: self._on_operation(fd, fs))
             self._table.setCellWidget(
-                i, 2, _wrap_button_centered(op_btn, metro10_hover_cell=self._metro10_chrome)
+                i, 2, mcmeta_standard_wrap_action_button(op_btn, self._table, i, self._hover_ctrl)
             )
         self._apply_mcmeta_table_row_heights()
-        if self._metro10_chrome:
-            self._metro10_set_hover_row(None)
+        self._hover_ctrl.set_hover_row(None)
         self._apply_filter()
 
     def _on_catalog_ready(self, catalog: object) -> None:
@@ -441,6 +315,6 @@ class McmetaVersionPickerDialog(QDialog):
 
     def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         self._aborted = True
-        if self._metro10_chrome:
-            self._table.viewport().removeEventFilter(self)
+        if self._hover_ctrl is not None:
+            self._hover_ctrl.remove_from_viewport()
         super().closeEvent(event)

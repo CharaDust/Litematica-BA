@@ -1,6 +1,6 @@
 """与旧项目 ``script/LitematicaViewer.start_analysis`` 对齐的方块统计（design §2.4.3）。
 
-方块遍历逻辑见 ``litematic_block_scan``；分类关键词来自 ``lang/setting.json`` 的 ``Category`` 表。
+方块遍历逻辑见 ``litematic_block_scan``；分类关键词来自 ``lang/category.json``。
 """
 
 from __future__ import annotations
@@ -14,12 +14,11 @@ from litematicaba.core.litematic_block_scan import scan_litematic
 
 
 def _load_category_ordered() -> list[tuple[str, list[str]]]:
-    path = project_root() / "lang" / "setting.json"
+    path = project_root() / "lang" / "category.json"
     raw = json.loads(path.read_text(encoding="utf-8"))
-    cat = raw.get("Category")
-    if not isinstance(cat, dict):
+    if not isinstance(raw, dict):
         return []
-    return [(str(k), list(v) if isinstance(v, list) else []) for k, v in cat.items()]
+    return [(str(k), list(v) if isinstance(v, list) else []) for k, v in raw.items()]
 
 
 def category_for_local_id(local_id: str, ordered: list[tuple[str, list[str]]]) -> str:

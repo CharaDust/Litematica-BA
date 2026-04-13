@@ -13,7 +13,8 @@ def grs(relative_path):
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)
 
-json_data = json.load(open(grs(os.path.join('lang', 'setting.json')), 'r', encoding='utf-8'))
+json_lang = json.load(open(grs(os.path.join('lang', 'zh_cn.json')), 'r', encoding='utf-8'))
+json_category = json.load(open(grs(os.path.join('lang', 'category.json')), 'r', encoding='utf-8'))
 
 def convert_units(number,lang):
     units = {'箱': 54 * 27 * 64, '盒': 27 * 64, '组': 64, '个': 1} if lang == "zh" else {'LargeChest': 54 * 27 * 64, 'Box': 27 * 64, 'S': 64, 'U': 1}
@@ -33,13 +34,19 @@ def cn_translate(id, key: bool = True, types = "Blocks") -> str:
     :param types: transfer dist type
     :return: Object Chinese name
     """
-    if key:
-        return json_data[types].get(id, id)
+    # 兼容旧接口：Blocks/Items 输入 local id，映射到标准语言键。
+    if types == "Blocks":
+        map_data = {k.removeprefix("block.minecraft."): v for k, v in json_lang.items() if k.startswith("block.minecraft.")}
+    elif types == "Items":
+        map_data = {k.removeprefix("item.minecraft."): v for k, v in json_lang.items() if k.startswith("item.minecraft.")}
     else:
-        for k, v in json_data[types].items():
-            if v == id:
-                return k
-        return id
+        map_data = json_lang
+    if key:
+        return map_data.get(id, id)
+    for k, v in map_data.items():
+        if v == id:
+            return k
+    return id
 
 def manual_install_pk():
     try:
@@ -54,7 +61,7 @@ def find_keys_by_value_in_list(dictionary, target_value):
 
 def Category_Tran(data):
     """find block category which belongs to"""
-    for key, value_list in json_data["Category"].items():
+    for key, value_list in json_category.items():
         for prop in data.split("_"):
             if prop in value_list:
                 return key

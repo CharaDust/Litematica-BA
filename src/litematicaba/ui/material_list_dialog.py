@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from litematicaba.core.config import project_root
+from litematicaba.core.game_resource_language import load_runtime_language_map
 from litematicaba.core.litematic_block_scan import scan_litematic_block_counts, sorted_block_counts
 from litematicaba.core.snbt_properties import load_snbt_properties
 from litematicaba.core.material_list_cache import (
@@ -55,17 +55,7 @@ def _placeholder_32() -> QPixmap:
 
 
 def _load_block_cn_map() -> dict[str, str]:
-    import json
-
-    path = project_root() / "lang" / "setting.json"
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    b = raw.get("Blocks")
-    if not isinstance(b, dict):
-        return {}
-    return {str(k): str(v) for k, v in b.items()}
+    return load_runtime_language_map()
 
 
 def _display_name(block_id: str, cn: dict[str, str]) -> str:
@@ -76,7 +66,11 @@ def _display_name(block_id: str, cn: dict[str, str]) -> str:
         local = raw.split(":", 1)[1]
     else:
         local = raw
-    return cn.get(local, raw)
+    return (
+        cn.get(f"block.minecraft.{local}")
+        or cn.get(f"block.{local}")
+        or raw
+    )
 
 
 _WIN_INVALID_FS = '<>:"/\\|?*\n\r\t'

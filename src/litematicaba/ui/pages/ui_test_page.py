@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QStackedWidget,
     QScrollBar,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
     QSizePolicy,
@@ -29,6 +31,15 @@ from litematicaba.ui.content_display.list_table.view import ContentListTableWidg
 from litematicaba.ui.content_display.public.factory import generate_content_rows
 from litematicaba.ui.content_display.tiles.inventory_grid import InventoryGridWidget, GridPos
 from litematicaba.ui.theme import normalize_theme_id
+from litematicaba.ui.widgets.mcmeta_standard_table import (
+    OBJ_MCMETA_STANDARD_APPLY_BTN,
+    OBJ_MCMETA_STANDARD_OP_BTN,
+    McmetaStandardTableCellHost,
+    apply_mcmeta_standard_table_row_heights,
+    configure_mcmeta_standard_action_table,
+    mcmeta_standard_wrap_action_button,
+    reapply_mcmeta_standard_action_table_theme,
+)
 
 # 内容物：显示方式与排序联动（磁贴 ↔ 自由排序；杂志/瀑布 ↔ 非自由排序）
 _VIEW_MODE_LIST = "列表"
@@ -241,11 +252,18 @@ class UiTestPage(QWidget):
 
         self._content_rows: list[ContentRow] = generate_content_rows(20)
         self._content_list = ContentListTableWidget(self._content_rows, theme_id=theme_id)
+        self._content_list.setObjectName("UiTestContentListTable")
+        self._content_list_host = QWidget()
+        self._content_list_host.setObjectName("UiTestContentListSection")
+        _cl_host_lay = QVBoxLayout(self._content_list_host)
+        _cl_host_lay.setContentsMargins(0, 0, 0, 0)
+        _cl_host_lay.setSpacing(0)
+        _cl_host_lay.addWidget(self._content_list)
         self._sort_combo.currentTextChanged.connect(self._on_content_sort_changed)
         self._on_content_sort_changed(self._sort_combo.currentText())
 
         self._content_view_stack = QStackedWidget()
-        self._content_view_stack.addWidget(self._content_list)
+        self._content_view_stack.addWidget(self._content_list_host)
         self._content_tile_grid = self._create_content_tile_grid(
             self._ordered_rows_for_sort(self._sort_combo.currentText())
         )
@@ -256,6 +274,73 @@ class UiTestPage(QWidget):
         self._content_view_other.setStyleSheet("color: palette(mid);")
         self._content_view_stack.addWidget(self._content_view_other)
         v.addWidget(self._content_view_stack, 1)
+
+        op_table_subtitle = QLabel("操作表")
+        op_table_subtitle.setStyleSheet("font-size: 18pt; background: transparent;")
+        v.addWidget(op_table_subtitle)
+
+        self._mcmeta_section = QWidget()
+        self._mcmeta_section.setObjectName("McmetaStandardTableSection")
+        mcmeta_sec_lay = QVBoxLayout(self._mcmeta_section)
+        mcmeta_sec_lay.setContentsMargins(0, 0, 0, 0)
+        mcmeta_sec_lay.setSpacing(8)
+        mcmeta_hint = QLabel(
+            "与「选项 → 游戏资源 → 管理游戏资源」弹窗相同。"
+            "Minecraft 下上方「内容物」列表与之共用边框与底纹，行悬停 #2b2b2b。"
+        )
+        mcmeta_hint.setWordWrap(True)
+        mcmeta_hint.setStyleSheet("background: transparent; color: palette(mid);")
+        mcmeta_sec_lay.addWidget(mcmeta_hint)
+        self._mcmeta_demo_table = QTableWidget()
+        self._mcmeta_hover = configure_mcmeta_standard_action_table(
+            self._mcmeta_demo_table,
+            self._theme_id,
+            column_labels=("说明", "", ""),
+        )
+        _demo_rows: list[tuple[str, bool]] = [
+            ("已安装样本（应用 + 清除）", True),
+            ("未安装样本（仅下载）", False),
+            ("已安装样本 2", True),
+            ("未安装样本 2", False),
+        ]
+        self._mcmeta_demo_table.setRowCount(len(_demo_rows))
+        for i, (label, installed) in enumerate(_demo_rows):
+            col0 = QTableWidgetItem(label)
+            col0.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+            self._mcmeta_demo_table.setItem(i, 0, col0)
+            if installed:
+                apply_btn = QPushButton("应用")
+                apply_btn.setObjectName(OBJ_MCMETA_STANDARD_APPLY_BTN)
+                apply_btn.setCheckable(True)
+                apply_btn.setAutoExclusive(False)
+                apply_btn.setChecked(i == 0)
+                self._mcmeta_demo_table.setCellWidget(
+                    i,
+                    1,
+                    mcmeta_standard_wrap_action_button(
+                        apply_btn, self._mcmeta_demo_table, i, self._mcmeta_hover
+                    ),
+                )
+                op_btn = QPushButton("清除")
+            else:
+                self._mcmeta_demo_table.setCellWidget(
+                    i,
+                    1,
+                    McmetaStandardTableCellHost(self._mcmeta_demo_table, i, self._mcmeta_hover),
+                )
+                op_btn = QPushButton("下载")
+            op_btn.setObjectName(OBJ_MCMETA_STANDARD_OP_BTN)
+            self._mcmeta_demo_table.setCellWidget(
+                i,
+                2,
+                mcmeta_standard_wrap_action_button(
+                    op_btn, self._mcmeta_demo_table, i, self._mcmeta_hover
+                ),
+            )
+        apply_mcmeta_standard_table_row_heights(self._mcmeta_demo_table, self._theme_id)
+        self._mcmeta_hover.set_hover_row(None)
+        mcmeta_sec_lay.addWidget(self._mcmeta_demo_table)
+        v.addWidget(self._mcmeta_section)
 
         self._view_mode_combo.currentTextChanged.connect(self._on_content_view_mode_changed)
         self._on_content_view_mode_changed(self._view_mode_combo.currentText())
@@ -323,7 +408,7 @@ class UiTestPage(QWidget):
         if text == "磁贴":
             self._content_view_stack.setCurrentWidget(self._content_tile_view)
         elif text == _VIEW_MODE_LIST:
-            self._content_view_stack.setCurrentWidget(self._content_list)
+            self._content_view_stack.setCurrentWidget(self._content_list_host)
         else:
             self._content_view_stack.setCurrentWidget(self._content_view_other)
 
@@ -573,6 +658,9 @@ class UiTestPage(QWidget):
         self._content_tile_grid.set_auto_place_preferred_cols(self._tile_auto_place_preferred_cols)
         self._content_tile_grid.set_draw_grid(self._show_tile_grid_enabled and content_free_drag)
         self._content_list.apply_list_theme(s.theme_id)
+        reapply_mcmeta_standard_action_table_theme(
+            self._mcmeta_demo_table, self._mcmeta_hover, self._theme_id
+        )
         self._update_content_tile_viewport_size()
 
     def resizeEvent(self, event: QResizeEvent) -> None:

@@ -37,6 +37,7 @@ from litematicaba.core.settings import (
     AppSettings,
     save_settings,
 )
+from litematicaba.ui.game_resource_language_dialog import GameResourceLanguageDialog
 from litematicaba.ui.mcmeta_version_picker_dialog import McmetaVersionPickerDialog
 
 
@@ -105,7 +106,7 @@ class OptionsPage(QWidget):
         form_render.addRow(self._deepslate_invert_y)
         self._deepslate_check_startup = QCheckBox("启动时检查渲染组件更新（需更新源可用后生效，默认关闭）")
         form_render.addRow(self._deepslate_check_startup)
-        self._btn_deepslate_update = QPushButton("立即检查渲染组件更新…")
+        self._btn_deepslate_update = QPushButton("立即检查渲染组件更新...")
         self._btn_deepslate_update.clicked.connect(self._on_deepslate_update_clicked)
         form_render.addRow(self._btn_deepslate_update)
 
@@ -121,9 +122,12 @@ class OptionsPage(QWidget):
         self._lbl_nbt_mcmeta_status = QLabel("—")
         self._lbl_nbt_mcmeta_status.setWordWrap(True)
         form_nbt.addRow("当前 mcmeta：", self._lbl_nbt_mcmeta_status)
-        self._btn_nbt_fetch = QPushButton("管理游戏资源版本…")
+        self._btn_nbt_fetch = QPushButton("管理游戏资源...")
         self._btn_nbt_fetch.clicked.connect(self._on_nbt_manage_clicked)
         form_nbt.addRow(self._btn_nbt_fetch)
+        self._btn_lang_manage = QPushButton("管理游戏语言...")
+        self._btn_lang_manage.clicked.connect(self._on_lang_manage_clicked)
+        form_nbt.addRow(self._btn_lang_manage)
         self._nbt_viewer_camera_debug = QCheckBox(
             "在 NBT 3D 预览中显示相机调试信息（cPos、cRot、与目标距离 cDist、结构尺寸等）"
         )
@@ -336,7 +340,7 @@ class OptionsPage(QWidget):
             return
         self._lbl_nbt_mcmeta_status.setText(
             f"未选择应用版本且无旧版 mcmeta。\n根目录：{base}\n"
-            "请打开「管理游戏资源版本」下载资源，并点击对应行的「应用」。"
+            "请打开「管理游戏资源」下载资源，并点击对应行的「应用」。"
         )
 
     def _on_nbt_manage_clicked(self) -> None:
@@ -353,6 +357,10 @@ class OptionsPage(QWidget):
         self._nbt_mcmeta_last_choice = (version_id or "").strip()
         self._persist()
         self._refresh_nbt_mcmeta_status_label()
+
+    def _on_lang_manage_clicked(self) -> None:
+        dlg = GameResourceLanguageDialog(self)
+        dlg.exec()
 
     def _persist(self) -> None:
         if self._loading:
