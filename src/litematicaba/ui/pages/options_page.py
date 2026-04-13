@@ -32,6 +32,7 @@ from litematicaba.core.settings import (
     NBT_EXPORT_FULL_ORTHOGRAPHIC_NEED_HALF_PADDING_DEFAULT,
     NBT_EXPORT_FULL_PERSPECTIVE_DIAG_EXTRA_DEFAULT,
     NBT_EXPORT_FULL_PERSPECTIVE_MIN_DISTANCE_DEFAULT,
+    NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT,
     VALID_THEMES,
     AppSettings,
     save_settings,
@@ -127,6 +128,14 @@ class OptionsPage(QWidget):
             "在 NBT 3D 预览中显示相机调试信息（cPos、cRot、与目标距离 cDist、结构尺寸等）"
         )
         form_nbt.addRow(self._nbt_viewer_camera_debug)
+        self._nbt_large_structure_threshold = QSpinBox()
+        self._nbt_large_structure_threshold.setRange(1_000, 1_000_000_000)
+        self._nbt_large_structure_threshold.setSingleStep(1_000)
+        self._nbt_large_structure_threshold.setToolTip(
+            "当结构体积（x*y*z）超过此值时，显示“Trying to render a very large structure”确认提示。"
+            f"默认值：{NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT}（48×48×48）。"
+        )
+        form_nbt.addRow("大结构提示阈值（体素）：", self._nbt_large_structure_threshold)
         self._nbt_mcmeta_last_choice = ""
 
         g_nbt_export = QGroupBox("NBT 3D — 完整入镜导出（「导出…」）")
@@ -228,6 +237,7 @@ class OptionsPage(QWidget):
         self._deepslate_invert_y.toggled.connect(self._persist)
         self._deepslate_check_startup.toggled.connect(self._persist)
         self._nbt_viewer_camera_debug.toggled.connect(self._persist)
+        self._nbt_large_structure_threshold.valueChanged.connect(self._persist)
         self._nbt_export_margin.valueChanged.connect(self._persist)
         self._nbt_export_persp_min.valueChanged.connect(self._persist)
         self._nbt_export_persp_diag.valueChanged.connect(self._persist)
@@ -252,6 +262,7 @@ class OptionsPage(QWidget):
         self._deepslate_invert_y.setChecked(s.deepslate_invert_y)
         self._deepslate_check_startup.setChecked(s.deepslate_check_updates_on_startup)
         self._nbt_viewer_camera_debug.setChecked(s.nbt_viewer_camera_debug)
+        self._nbt_large_structure_threshold.setValue(s.nbt_viewer_large_structure_threshold)
         self._nbt_mcmeta_last_choice = s.nbt_mcmeta_target_version
         self._nbt_export_margin.setValue(s.nbt_export_full_margin)
         self._nbt_export_persp_min.setValue(s.nbt_export_full_perspective_min_distance)
@@ -276,6 +287,7 @@ class OptionsPage(QWidget):
             deepslate_check_updates_on_startup=self._deepslate_check_startup.isChecked(),
             deepslate_invert_y=self._deepslate_invert_y.isChecked(),
             nbt_viewer_camera_debug=self._nbt_viewer_camera_debug.isChecked(),
+            nbt_viewer_large_structure_threshold=self._nbt_large_structure_threshold.value(),
             nbt_mcmeta_target_version=self._nbt_mcmeta_last_choice.strip(),
             nbt_export_full_margin=self._nbt_export_margin.value(),
             nbt_export_full_perspective_min_distance=self._nbt_export_persp_min.value(),

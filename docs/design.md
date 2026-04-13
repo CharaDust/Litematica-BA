@@ -6,6 +6,7 @@
 | V1.2 | 2026-04-11 | CharaDust | 补充旧项目（`script/`）统计指标：红石偏度、材质、液体偏度、密度算法 |
 | V1.3 | 2026-04-12 | CharaDust | 渲染方案：以 Deepslate（内嵌 WebView）为主路径，`legacy` 为备选并持续迭代；新增 **2.6.3** 技术说明 |
 | V1.4 | 2026-04-12 | CharaDust | 明确 Deepslate 非每次启动从 GitHub 拉代码；选项页增加渲染组件更新相关项（**2.0.4**、**2.6.3.9**） |
+| V1.5 | 2026-04-13 | CharaDust | Render「完整入镜导出」参数配置化：新增选项项与默认值提示，区分透视/正交公式并写入设置（**2.0.4**、**2.6.3.6**、**2.6.3.10**） |
 ---
 ## 1. 项目概述
 ### 1.1 项目名称
@@ -53,6 +54,7 @@
 | FR-O.3 | Deepslate 更新说明 | 选项内说明：**Deepslate 在构建时打包，启动默认不从 GitHub 下载源码** | P1 |
 | FR-O.4 | 启动时检查渲染组件 | 开关项 `deepslate_check_updates_on_startup`（默认关）；在**独立渲染资源包更新源**就绪后，可在启动时联网检查（与 npm/GitHub 源码拉取无关） | P2 |
 | FR-O.5 | 手动检查渲染组件 | 按钮「立即检查渲染组件更新」：当前版本提示策略与完整应用升级路径；将来可改为拉取清单并下载差分包 | P2 |
+| FR-O.6 | NBT 完整入镜导出参数 | 提供「NBT 3D — 完整入镜导出（导出…）」参数组；参数持久化到 `settings.json`，控件提示需注明内置默认值；参数调整后对后续导出立即生效 | P1 |
 ---
 ### 2.1 模块一：主页（Home）
 #### 2.1.1 功能描述
@@ -291,12 +293,32 @@ $$
 | 子区域切换 | 与 FR-R.2 对齐 | 可只传当前子区域对应 NBT 子树或预裁剪结构，降低单次 GPU/内存压力 |
 
 ##### 2.6.3.5 相机预设与 FR-R.6
-- 在封装层用 `gl-matrix` 计算 **预设 `viewMatrix`**（顶视、四向正视、四角 45° 俯视），与界面 **9 个方向按钮**一一绑定；绘制循环调用 Deepslate 的 `StructureRenderer` 相应入口（思路同 vscode-nbt `StructureEditor` 中的视图矩阵与 `drawStructure`）。
+- 预设基于 `StructureEditor` 轨道参数定义：`cRot[0]=yaw`（绕 Y）、`cRot[1]=pitch`（绕 X），视图矩阵顺序为 `T(0,0,-cDist) * Rx(cRot[1]) * Ry(cRot[0]) * T(cPos)`；绘制循环调用 Deepslate 的 `StructureRenderer` 入口（思路同 vscode-nbt `StructureEditor`）。
+- 9 个方向按钮与预设一一绑定；按钮为**瞬时触发**而非“保持选中态”，用户手动拖拽改变相机后可再次点击同一方向，强制重新应用该预设。
+- NBT 3D 在**首次加载**与**重新加载 3D**完成后，统一恢复默认轨道相机（与 `StructureEditor` 初始化一致）：`cRot=(0.4, 0.6)`，并按 `onInit` 规则重算 `cPos/cDist`；FOV 仍由 FOV 滑块值决定。
 - 交互式旋转/缩放可在页内实现；导出缩略图时使用与按钮一致的预设矩阵以保证输出稳定、可复现。
+
+预设角（弧度）定义：
+
+| 方向 | `cRot[0]`（yaw） | `cRot[1]`（pitch） |
+|---|---|---|
+| 顶视 | `0` | `π/2` |
+| 北 | `π` | `0` |
+| 南 | `0` | `0` |
+| 西 | `π/2` | `0` |
+| 东 | `-π/2` | `0` |
+| 西北 | `atan2(sx, -sz)` | `atan2(sy, hypot(sx, sz))` |
+| 东北 | `atan2(-sx, -sz)` | `atan2(sy, hypot(sx, sz))` |
+| 西南 | `atan2(sx, sz)` | `atan2(sy, hypot(sx, sz))` |
+| 东南 | `atan2(-sx, sz)` | `atan2(sy, hypot(sx, sz))` |
+
+其中 `sx/sy/sz` 为结构尺寸 `getSize()` 的三个轴向分量；四个对角方向共用同一 `pitch`，仅 `yaw` 象限不同。
 
 ##### 2.6.3.6 缩略图与预览图（FR-R.7）
 - 从 WebView 内 **离屏或当前 `canvas`** 导出：`canvas.toDataURL('image/png')` 或通过桥接回传 **PNG 字节流**；宿主负责写入文件内 `PreviewImageData` 或导出到用户路径。
 - 分辨率与宽高比需在文档或设置中约定（例如与属性页预览图 140×140 策略协调）。
+- 当前实现将输出拆分为两种动作：**截屏**（当前视口）与**导出**（完整入镜）；两者均先给出预览，再由用户选择“保存为 PNG”或“写入预览图”。
+- NBT「导出」路径不修改 `canvas` 尺寸、不调用 `resize()`，仅临时调整相机参数后在当前画布导出，避免 WebGL 资源重置导致空白图。
 
 ##### 2.6.3.7 性能、体积与超大结构
 - 参考 vscode-nbt：对 **超大体积**（如超过约 $48^3$ 体素）可 **警告后继续** 或 **关闭高成本特性**（如不可见块相关 Pass）；本软件可额外采用 **仅加载当前子区域**、**降采样** 或 **进度条**（对齐 NFR-1.4）。
@@ -310,6 +332,28 @@ $$
 - **不会在每次启动时从 GitHub 下载 Deepslate 源码**：与 [vscode-nbt](https://github.com/misode/vscode-nbt) 类似，Deepslate 为 **npm 依赖，在构建阶段打入静态 JS**，随安装包分发。
 - **可能联网的场景**（与「Deepslate 代码」区分）：**Minecraft 方块资源**（blockstates / models / 图集等）可在首次使用或版本切换时 **下载并缓存在本地**（如 `data/render_assets/`），不应在无操作时静默高频请求。
 - **用户可控更新**：在 **选项** 中提供「启动时检查渲染组件更新」（默认关闭，待更新源定义后实现）与 **手动「检查渲染组件更新」**（见 **§2.0.4 FR-O.4 / FR-O.5**）。若将来提供独立于主程序的渲染资源包，通过清单 URL 比对版本并下载；**升级主程序**仍是获取新构建内嵌 Deepslate 修订的主要方式。
+
+##### 2.6.3.10 NBT「完整入镜导出」参数化（透视/正交）
+- 目标：在保持当前旋转（`cRot`）与当前画布分辨率的前提下，使结构尽量完整入镜；参数可在选项页调整并持久化。
+- 宿主（Python）将设置项注入页面全局对象 `window.__lbaExportFullParams`；前端导出函数读取后参与距离估算。
+- 若注入缺失或值非法，前端必须回退到内置默认值，保证导出行为稳定可预测。
+
+参数定义（默认值）：
+
+| 设置键 | 作用公式 | 默认值 |
+|---|---|---|
+| `nbt_export_full_margin` | `r = diag * 0.5 * margin`（共用入镜边距） | `1.22` |
+| `nbt_export_full_perspective_min_distance` | 透视距离下限 `max(minDist, ...)` | `6.0` |
+| `nbt_export_full_perspective_diag_extra` | 透视附加项 `+ diag * diagExtra` | `0.12` |
+| `nbt_export_full_orthographic_need_half_padding` | 正交半高需求 `needHalfH = r + padding` | `1.0` |
+| `nbt_export_full_orthographic_height_scale` | 正交换算 `cDist = needHalfH / scale + ...` 与 `orthoHalfHeight = cDist * scale` | `0.38` |
+| `nbt_export_full_orthographic_diag_extra` | 正交附加项 `+ diag * diagExtra` | `0.15` |
+| `nbt_export_full_orthographic_min_distance` | 正交距离下限 `max(minDist, ...)` | `12.0` |
+| `nbt_export_full_orthographic_half_height_min` | 正交投影半高下限 `max(cDist * scale, halfHeightMin)` | `2.5` |
+
+实现约束：
+- 仅 NBT Viewer 的「导出…」使用该参数集；Deepslate 回退页可后续按同语义补齐。
+- UI 中每个参数控件需通过提示文案展示“默认值”，便于用户按默认配置回退与调参对照。
 
 ---
 ### 2.7 模块七：方块替换（Replace）

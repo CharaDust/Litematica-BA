@@ -21608,7 +21608,12 @@ var nbtEditor = (function (exports) {
         }
         isLarge() {
             const [x, y, z] = this.structure.getSize();
-            return x * y * z > 48 * 48 * 48;
+            const defaultThreshold = 48 * 48 * 48;
+            const configuredThreshold = typeof window !== 'undefined' && typeof window.__lbaLargeStructureThreshold === 'number'
+                ? Math.floor(window.__lbaLargeStructureThreshold)
+                : defaultThreshold;
+            const threshold = Math.max(1, configuredThreshold);
+            return x * y * z > threshold;
         }
         loadStructure() {
             var _a, _b, _c;

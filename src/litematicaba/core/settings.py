@@ -34,6 +34,7 @@ NBT_EXPORT_FULL_ORTHOGRAPHIC_HEIGHT_SCALE_DEFAULT = 0.38
 NBT_EXPORT_FULL_ORTHOGRAPHIC_DIAG_EXTRA_DEFAULT = 0.15
 NBT_EXPORT_FULL_ORTHOGRAPHIC_MIN_DISTANCE_DEFAULT = 12.0
 NBT_EXPORT_FULL_ORTHOGRAPHIC_HALF_HEIGHT_MIN_DEFAULT = 2.5
+NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT = 48 * 48 * 48
 
 
 @dataclass
@@ -62,6 +63,8 @@ class AppSettings:
     nbt_export_full_orthographic_diag_extra: float = NBT_EXPORT_FULL_ORTHOGRAPHIC_DIAG_EXTRA_DEFAULT
     nbt_export_full_orthographic_min_distance: float = NBT_EXPORT_FULL_ORTHOGRAPHIC_MIN_DISTANCE_DEFAULT
     nbt_export_full_orthographic_half_height_min: float = NBT_EXPORT_FULL_ORTHOGRAPHIC_HALF_HEIGHT_MIN_DEFAULT
+    # NBT 3D：触发“大结构渲染警告”前的体素数量阈值（x*y*z）
+    nbt_viewer_large_structure_threshold: int = NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT
 
     def normalized(self) -> AppSettings:
         t = self.theme_id if self.theme_id in VALID_THEMES else DEFAULT_THEME
@@ -100,6 +103,9 @@ class AppSettings:
             ),
             nbt_export_full_orthographic_half_height_min=max(
                 0.1, min(100.0, float(self.nbt_export_full_orthographic_half_height_min))
+            ),
+            nbt_viewer_large_structure_threshold=max(
+                1_000, min(1_000_000_000, int(self.nbt_viewer_large_structure_threshold))
             ),
         )
 
@@ -171,6 +177,12 @@ def load_settings() -> AppSettings:
             raw.get(
                 "nbt_export_full_orthographic_half_height_min",
                 NBT_EXPORT_FULL_ORTHOGRAPHIC_HALF_HEIGHT_MIN_DEFAULT,
+            )
+        ),
+        nbt_viewer_large_structure_threshold=int(
+            raw.get(
+                "nbt_viewer_large_structure_threshold",
+                NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT,
             )
         ),
     ).normalized()

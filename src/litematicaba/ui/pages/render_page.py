@@ -270,6 +270,11 @@ class RenderPage(QWidget):
         self._nbt_camera_debug: bool = (
             bool(app_settings.nbt_viewer_camera_debug) if app_settings is not None else False
         )
+        self._nbt_large_structure_threshold: int = (
+            int(app_settings.nbt_viewer_large_structure_threshold)
+            if app_settings is not None
+            else 48 * 48 * 48
+        )
         self._nbt_applied_mcmeta_version = ""
         if app_settings is not None:
             self._nbt_applied_mcmeta_version = (app_settings.nbt_mcmeta_target_version or "").strip()
@@ -290,16 +295,30 @@ class RenderPage(QWidget):
         self._lbl_path = QLabel("请在「属性」页加载 .litematic。")
         self._lbl_path.setWordWrap(True)
 
+        self._scheme_strip = QWidget()
+        scheme_row = QHBoxLayout(self._scheme_strip)
+        scheme_row.addWidget(QLabel("渲染方案："))
+        self._scheme_combo = QComboBox()
+        self._scheme_combo.addItem("deepslate", "deepslate")
+        self._scheme_combo.addItem("nbt-viewer", "nbt-viewer")
+        self._scheme_combo.currentIndexChanged.connect(self._on_scheme_changed)
+        scheme_row.addWidget(self._scheme_combo)
+        scheme_row.addStretch(1)
+
         self._region_strip = QWidget()
         reg_row = QHBoxLayout(self._region_strip)
-        reg_row.addWidget(QLabel("子区域："))
+        reg_row.addWidget(QLabel("选择区域："))
         self._region_combo = QComboBox()
         self._region_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._region_combo.currentIndexChanged.connect(self._on_region_changed)
         reg_row.addWidget(self._region_combo, 1)
 
-        self._dir_box = QGroupBox("观察方向（FR-R.6，相机预设）")
+        self._dir_box = QGroupBox("渲染设置")
         dir_outer = QVBoxLayout(self._dir_box)
+        self._btn_refresh = QPushButton("重新加载3D")
+        self._btn_refresh.clicked.connect(self._on_refresh_clicked)
+        dir_outer.addWidget(self._btn_refresh)
+
         dir_center_row = QHBoxLayout()
         dir_center_row.addStretch(1)
         grid_host = QWidget()
@@ -325,10 +344,13 @@ class RenderPage(QWidget):
             grid.addWidget(btn, row, col)
         dir_center_row.addWidget(grid_host, 0, Qt.AlignmentFlag.AlignHCenter)
         dir_center_row.addStretch(1)
+        dir_outer.addWidget(QLabel("观察方向"))
         dir_outer.addLayout(dir_center_row)
 
+        fov_label = QLabel("视角 FOV（0°=正交）")
+        dir_outer.addWidget(fov_label)
+
         fov_row = QHBoxLayout()
-        fov_row.addWidget(QLabel("视角 FOV（0°=正交）"))
         self._fov_slider = QSlider(Qt.Orientation.Horizontal)
         self._fov_slider.setRange(0, 110)
         self._fov_slider.setValue(70)
@@ -350,9 +372,6 @@ class RenderPage(QWidget):
         self._btn_reset_camera.clicked.connect(self._on_reset_nbt_default_camera)
         self._btn_reset_camera.setVisible(self._use_nbt_viewer)
         dir_outer.addWidget(self._btn_reset_camera)
-
-        self._btn_refresh = QPushButton("重新加载 3D")
-        self._btn_refresh.clicked.connect(self._on_refresh_clicked)
 
         btn_row = QHBoxLayout()
         self._btn_material = QPushButton("材料列表（当前区域）")
@@ -378,12 +397,20 @@ class RenderPage(QWidget):
 
         root = QVBoxLayout(self)
         root.addWidget(self._lbl_path)
-        root.addWidget(self._region_strip)
-        root.addWidget(self._dir_box)
-        self._region_strip.setVisible(not self._use_nbt_viewer)
-        root.addWidget(self._btn_refresh)
-        root.addLayout(btn_row)
-        root.addWidget(self._status)
+        root.addWidget(self._scheme_strip)
+
+        content_row = QHBoxLayout()
+        left_col = QVBoxLayout()
+        left_col.addWidget(self._region_strip)
+        left_col.addLayout(btn_row)
+        left_col.addWidget(QLabel("渲染界面"))
+        left_col.addWidget(self._status)
+        content_row.addLayout(left_col, 3)
+        right_col = QVBoxLayout()
+        right_col.addWidget(self._dir_box, 0, Qt.AlignmentFlag.AlignTop)
+        right_col.addStretch(1)
+        content_row.addLayout(right_col, 2)
+        root.addLayout(content_row, 1)
 
         if not _HAS_WEBENGINE or QWebEngineView is None:
             tip = QLabel(
@@ -411,9 +438,37 @@ class RenderPage(QWidget):
                 self._view.load(QUrl.fromLocalFile(str(html.resolve())))
             else:
                 self._status.setText(f"缺少内置页面：{html}")
-            root.addWidget(self._view, 1)
+            left_col.addWidget(self._view, 1)
 
+        self._sync_scheme_combo()
         self._props.active_file_changed.connect(self._on_active_file_changed)
+
+    def _sync_scheme_combo(self) -> None:
+        nbt_ok = bool(_HAS_WEBENGINE and self._nbt_html_path is not None)
+        deepslate_ok = bool(_HAS_WEBENGINE and _viewer_html_path().is_file())
+        m = self._scheme_combo.model()
+        if m is not None:
+            nbt_item = m.item(1)
+            if nbt_item is not None:
+                nbt_item.setEnabled(nbt_ok)
+            deepslate_item = m.item(0)
+            if deepslate_item is not None:
+                deepslate_item.setEnabled(deepslate_ok)
+        want = "nbt-viewer" if self._use_nbt_viewer else "deepslate"
+        idx = self._scheme_combo.findData(want)
+        if idx >= 0:
+            self._scheme_combo.blockSignals(True)
+            self._scheme_combo.setCurrentIndex(idx)
+            self._scheme_combo.blockSignals(False)
+
+    def _selected_scheme(self) -> str:
+        d = self._scheme_combo.currentData()
+        if isinstance(d, str) and d:
+            return d
+        return "deepslate"
+
+    def _on_scheme_changed(self, _index: int) -> None:
+        self._on_refresh_clicked()
 
     def _cache_nbt_export_params_from_settings(self, s: AppSettings) -> None:
         n = s.normalized()
@@ -444,10 +499,13 @@ class RenderPage(QWidget):
     def _on_refresh_clicked(self) -> None:
         """重新解析 NBT 查看器入口（外部 data 或合并页），再加载当前投影。"""
         p, m = resolve_nbt_viewer_html_path(self._nbt_applied_mcmeta_version)
-        now_nbt = bool(_HAS_WEBENGINE and p is not None)
+        nbt_ok = bool(_HAS_WEBENGINE and p is not None)
+        use_nbt = self._selected_scheme() == "nbt-viewer"
+        now_nbt = bool(use_nbt and nbt_ok)
+        if use_nbt and not nbt_ok:
+            self._status.setText("nbt-viewer 不可用，已回退到 deepslate。")
         if now_nbt != self._use_nbt_viewer:
             self._use_nbt_viewer = now_nbt
-            self._region_strip.setVisible(not now_nbt)
             self._btn_reset_camera.setVisible(now_nbt)
         self._nbt_html_path, self._nbt_viewer_mode = p, m
         if self._view is not None and _HAS_WEBENGINE:
@@ -459,6 +517,7 @@ class RenderPage(QWidget):
                 if html.is_file():
                     self._viewer_ready = False
                     self._view.load(QUrl.fromLocalFile(str(html.resolve())))
+        self._sync_scheme_combo()
         self._schedule_load()
 
     def apply_deepslate_settings(self, s: AppSettings) -> None:
@@ -470,9 +529,11 @@ class RenderPage(QWidget):
             self._on_refresh_clicked()
             return
         self._nbt_camera_debug = bool(s.nbt_viewer_camera_debug)
+        self._nbt_large_structure_threshold = int(s.nbt_viewer_large_structure_threshold)
         self._cache_nbt_export_params_from_settings(s)
         if self._use_nbt_viewer:
             self._push_nbt_camera_debug()
+            self._sync_nbt_large_structure_threshold_js()
             self._sync_export_full_params_js()
         else:
             self._push_invert_y_to_webview()
@@ -495,6 +556,12 @@ class RenderPage(QWidget):
             return
         on = "true" if self._nbt_camera_debug else "false"
         self._view.page().runJavaScript(f"window.lbaSetNbtCameraDebug({on});")
+
+    def _sync_nbt_large_structure_threshold_js(self) -> None:
+        if self._view is None or not self._viewer_ready or not self._use_nbt_viewer:
+            return
+        value = max(1_000, min(1_000_000_000, int(self._nbt_large_structure_threshold)))
+        self._view.page().runJavaScript(f"window.__lbaLargeStructureThreshold={value};")
 
     def _current_view_preset(self) -> int:
         return max(0, min(8, int(self._last_view_preset)))
@@ -624,6 +691,7 @@ class RenderPage(QWidget):
         if ok:
             if self._use_nbt_viewer:
                 self._prime_nbt_camera_debug_global()
+                self._sync_nbt_large_structure_threshold_js()
             injected = self._try_inject_pending()
             if not self._use_nbt_viewer:
                 self._last_view_preset = 0
@@ -653,16 +721,13 @@ class RenderPage(QWidget):
             keys = list(sch.regions.keys())
         except Exception:
             keys = []
-        if len(keys) > 1:
-            self._region_combo.addItem("全部区域（合并）", None)
+        self._region_combo.addItem("全部区域", None)
         for k in keys:
             self._region_combo.addItem(k, k)
         self._region_combo.blockSignals(False)
 
     def _payload_region_name(self) -> str | None:
         """传给体素线程：``None`` 表示「全部区域合并」；非 ``None`` 为单区域名。"""
-        if self._use_nbt_viewer:
-            return None
         d = self._region_combo.currentData()
         if d is None:
             return None
