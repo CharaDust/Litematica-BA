@@ -57,6 +57,17 @@ VALID_MATERIAL_LIST_PREWARM_MODES = (
 )
 DEFAULT_MATERIAL_LIST_PREWARM_MODE = MATERIAL_LIST_PREWARM_ON_LITEMATIC
 
+# 材料列表方块图标预载：主线程泵送节奏与解码位置（design / 性能选项）
+BLOCK_ICON_PREWARM_DECODE_MAIN = "main"
+BLOCK_ICON_PREWARM_DECODE_WORKER = "worker_experimental"
+VALID_BLOCK_ICON_PREWARM_DECODE_THREADS = (
+    BLOCK_ICON_PREWARM_DECODE_MAIN,
+    BLOCK_ICON_PREWARM_DECODE_WORKER,
+)
+DEFAULT_BLOCK_ICON_PREWARM_BATCH_INTERVAL_MS = 8
+DEFAULT_BLOCK_ICON_PREWARM_BATCH_COUNT = 10
+DEFAULT_BLOCK_ICON_PREWARM_DECODE_THREAD = BLOCK_ICON_PREWARM_DECODE_MAIN
+
 
 @dataclass
 class AppSettings:
@@ -90,6 +101,10 @@ class AppSettings:
     block_icon_preload_mode: str = DEFAULT_BLOCK_ICON_PRELOAD_MODE
     # 材料列表「整个投影」扫描时机；不改为清除磁盘材料缓存。
     material_list_prewarm_mode: str = DEFAULT_MATERIAL_LIST_PREWARM_MODE
+    # 方块图标预载：定时器间隔（毫秒）、每 tick 处理数量；解码在主线程或工作线程（实验性）。
+    block_icon_prewarm_batch_interval_ms: int = DEFAULT_BLOCK_ICON_PREWARM_BATCH_INTERVAL_MS
+    block_icon_prewarm_batch_count: int = DEFAULT_BLOCK_ICON_PREWARM_BATCH_COUNT
+    block_icon_prewarm_decode_thread: str = DEFAULT_BLOCK_ICON_PREWARM_DECODE_THREAD
 
     def normalized(self) -> AppSettings:
         t = self.theme_id if self.theme_id in VALID_THEMES else DEFAULT_THEME
@@ -102,6 +117,11 @@ class AppSettings:
             self.material_list_prewarm_mode
             if self.material_list_prewarm_mode in VALID_MATERIAL_LIST_PREWARM_MODES
             else DEFAULT_MATERIAL_LIST_PREWARM_MODE
+        )
+        bdt = (
+            self.block_icon_prewarm_decode_thread
+            if self.block_icon_prewarm_decode_thread in VALID_BLOCK_ICON_PREWARM_DECODE_THREADS
+            else DEFAULT_BLOCK_ICON_PREWARM_DECODE_THREAD
         )
         return AppSettings(
             theme_id=t,
@@ -144,6 +164,13 @@ class AppSettings:
             ),
             block_icon_preload_mode=bim,
             material_list_prewarm_mode=mlm,
+            block_icon_prewarm_batch_interval_ms=max(
+                0, min(2000, int(self.block_icon_prewarm_batch_interval_ms))
+            ),
+            block_icon_prewarm_batch_count=max(
+                1, min(500, int(self.block_icon_prewarm_batch_count))
+            ),
+            block_icon_prewarm_decode_thread=bdt,
         )
 
 
@@ -227,6 +254,24 @@ def load_settings() -> AppSettings:
         ),
         material_list_prewarm_mode=str(
             raw.get("material_list_prewarm_mode", DEFAULT_MATERIAL_LIST_PREWARM_MODE)
+        ),
+        block_icon_prewarm_batch_interval_ms=int(
+            raw.get(
+                "block_icon_prewarm_batch_interval_ms",
+                DEFAULT_BLOCK_ICON_PREWARM_BATCH_INTERVAL_MS,
+            )
+        ),
+        block_icon_prewarm_batch_count=int(
+            raw.get(
+                "block_icon_prewarm_batch_count",
+                DEFAULT_BLOCK_ICON_PREWARM_BATCH_COUNT,
+            )
+        ),
+        block_icon_prewarm_decode_thread=str(
+            raw.get(
+                "block_icon_prewarm_decode_thread",
+                DEFAULT_BLOCK_ICON_PREWARM_DECODE_THREAD,
+            )
         ),
     ).normalized()
 

@@ -29,7 +29,11 @@ from litematicaba.core.settings import (
     BLOCK_ICON_PRELOAD_ON_LITEMATIC,
     BLOCK_ICON_PRELOAD_ON_MATERIAL_OR_FLAKE,
     BLOCK_ICON_PRELOAD_STARTUP,
+    BLOCK_ICON_PREWARM_DECODE_MAIN,
+    BLOCK_ICON_PREWARM_DECODE_WORKER,
     DEFAULT_BLOCK_ICON_PRELOAD_MODE,
+    DEFAULT_BLOCK_ICON_PREWARM_BATCH_COUNT,
+    DEFAULT_BLOCK_ICON_PREWARM_BATCH_INTERVAL_MS,
     MATERIAL_LIST_PREWARM_ON_LITEMATIC,
     MATERIAL_LIST_PREWARM_ON_MATERIAL_LIST,
     NBT_EXPORT_FULL_MARGIN_DEFAULT,
@@ -124,6 +128,32 @@ class OptionsPage(QWidget):
             "首次点击材料列表时", MATERIAL_LIST_PREWARM_ON_MATERIAL_LIST
         )
         form_perf.addRow("材料列表计算时机：", self._material_list_prewarm)
+        self._block_icon_prewarm_interval_ms = QSpinBox()
+        self._block_icon_prewarm_interval_ms.setRange(0, 2000)
+        self._block_icon_prewarm_interval_ms.setSingleStep(1)
+        self._block_icon_prewarm_interval_ms.setSuffix(" ms")
+        self._block_icon_prewarm_interval_ms.setToolTip(
+            "主线程将解码结果写入缓存时的定时器间隔；0 表示尽快触发（仍受事件循环调度）。"
+            f"默认 {DEFAULT_BLOCK_ICON_PREWARM_BATCH_INTERVAL_MS} ms。"
+        )
+        form_perf.addRow("图标预载批次间隔：", self._block_icon_prewarm_interval_ms)
+        self._block_icon_prewarm_batch_count = QSpinBox()
+        self._block_icon_prewarm_batch_count.setRange(1, 500)
+        self._block_icon_prewarm_batch_count.setToolTip(
+            "每个批次在主线程最多处理的图标数量（写入缓存）。"
+            f"默认 {DEFAULT_BLOCK_ICON_PREWARM_BATCH_COUNT}。"
+        )
+        form_perf.addRow("图标预载批次数量：", self._block_icon_prewarm_batch_count)
+        self._block_icon_prewarm_decode_thread = QComboBox()
+        self._block_icon_prewarm_decode_thread.addItem("主线程", BLOCK_ICON_PREWARM_DECODE_MAIN)
+        self._block_icon_prewarm_decode_thread.addItem(
+            "工作线程（实验性）", BLOCK_ICON_PREWARM_DECODE_WORKER
+        )
+        self._block_icon_prewarm_decode_thread.setToolTip(
+            "主线程：在工作线程只读文件，在主线程解码 PNG。"
+            " 工作线程：在工作线程解码并缩放到 32×32，主线程仅转为 QPixmap 并写入缓存（实验性）。"
+        )
+        form_perf.addRow("图标预载解码线程：", self._block_icon_prewarm_decode_thread)
 
         g_render = QGroupBox("Deepslate 渲染")
         form_render = QFormLayout(g_render)
@@ -290,6 +320,9 @@ class OptionsPage(QWidget):
         self._nbt_export_ortho_hmin.valueChanged.connect(self._persist)
         self._block_icon_preload.currentIndexChanged.connect(self._on_block_icon_preload_changed)
         self._material_list_prewarm.currentIndexChanged.connect(self._persist)
+        self._block_icon_prewarm_interval_ms.valueChanged.connect(self._persist)
+        self._block_icon_prewarm_batch_count.valueChanged.connect(self._persist)
+        self._block_icon_prewarm_decode_thread.currentIndexChanged.connect(self._persist)
 
         self._loading = False
 
@@ -320,6 +353,10 @@ class OptionsPage(QWidget):
         self._block_icon_preload.setCurrentIndex(bidx if bidx >= 0 else 0)
         midx = self._material_list_prewarm.findData(s.material_list_prewarm_mode)
         self._material_list_prewarm.setCurrentIndex(midx if midx >= 0 else 0)
+        self._block_icon_prewarm_interval_ms.setValue(s.block_icon_prewarm_batch_interval_ms)
+        self._block_icon_prewarm_batch_count.setValue(s.block_icon_prewarm_batch_count)
+        tidx = self._block_icon_prewarm_decode_thread.findData(s.block_icon_prewarm_decode_thread)
+        self._block_icon_prewarm_decode_thread.setCurrentIndex(tidx if tidx >= 0 else 0)
         self._committed_block_icon_mode = self._block_icon_preload.currentData()
         self._refresh_nbt_mcmeta_status_label()
         self._loading = False
@@ -348,6 +385,9 @@ class OptionsPage(QWidget):
             nbt_export_full_orthographic_half_height_min=self._nbt_export_ortho_hmin.value(),
             block_icon_preload_mode=self._block_icon_preload.currentData(),
             material_list_prewarm_mode=self._material_list_prewarm.currentData(),
+            block_icon_prewarm_batch_interval_ms=self._block_icon_prewarm_interval_ms.value(),
+            block_icon_prewarm_batch_count=self._block_icon_prewarm_batch_count.value(),
+            block_icon_prewarm_decode_thread=self._block_icon_prewarm_decode_thread.currentData(),
         ).normalized()
 
     def _on_deepslate_update_clicked(self) -> None:

@@ -199,7 +199,9 @@ class MainWindow(QWidget):
         self._widget_inspector.set_enabled(self._settings.show_widget_inspector)
         self._perf_test = PerfTestController(self)
         self._perf_test.set_enabled(self._settings.perf_test_overlay)
-        self._material_list_icon_prewarmer = MaterialListIconPrewarmer(self)
+        self._material_list_icon_prewarmer = MaterialListIconPrewarmer(
+            self, config_provider=self._block_icon_prewarm_config
+        )
         attach_material_list_icon_prewarmer(self._material_list_icon_prewarmer)
         register_material_ui_icon_prewarm_hook(self._maybe_start_icon_prewarm_from_material_ui)
         self._btn_home.setChecked(True)
@@ -207,6 +209,14 @@ class MainWindow(QWidget):
 
         # 避免子控件（如主页 Logo）曾出现过大 minimumSize 后把整窗最小宽度锁死
         self.setMinimumSize(0, 0)
+
+    def _block_icon_prewarm_config(self) -> tuple[int, int, str]:
+        s = self._settings.normalized()
+        return (
+            s.block_icon_prewarm_batch_interval_ms,
+            s.block_icon_prewarm_batch_count,
+            s.block_icon_prewarm_decode_thread,
+        )
 
     def schedule_material_list_icon_prewarm(self) -> None:
         """窗口先完成首帧绘制后再预载图标，减轻与冷启动争用。"""
@@ -327,6 +337,7 @@ class MainWindow(QWidget):
 
     def _on_settings_changed(self, s: AppSettings) -> None:
         old_icon = self._settings.block_icon_preload_mode
+        old_decode_thread = self._settings.block_icon_prewarm_decode_thread
         self._settings = s
         apply_theme(QApplication.instance(), s.theme_id)
         self._btn_ui_test.setVisible(s.show_ui_test_nav)
@@ -343,5 +354,13 @@ class MainWindow(QWidget):
             self._material_list_icon_prewarmer.stop()
         elif s.block_icon_preload_mode == BLOCK_ICON_PRELOAD_STARTUP and old_icon != BLOCK_ICON_PRELOAD_STARTUP:
             self.schedule_material_list_icon_prewarm()
+        elif (
+            s.block_icon_preload_mode != BLOCK_ICON_PRELOAD_NEVER
+            and self._material_list_icon_prewarmer.is_active()
+        ):
+            if s.block_icon_prewarm_decode_thread != old_decode_thread:
+                self._material_list_icon_prewarmer.restart()
+            else:
+                self._material_list_icon_prewarmer.apply_live_config()
         if not s.show_ui_test_nav and self._stack.currentIndex() == PAGE_UI_TEST:
             self._stack.setCurrentIndex(PAGE_HOME)
