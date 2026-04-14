@@ -367,6 +367,40 @@ def apply_game_resource_language_table_chrome(
     return ctrl
 
 
+def apply_block_icon_resource_table_chrome(
+    table: QTableWidget,
+    theme_id: str,
+) -> McmetaStandardTableRowHoverController:
+    """方块图标资源管理：前三列为文本，第四列为操作区；语义与语言管理表一致。"""
+    tid = normalize_theme_id(theme_id)
+    metro10 = tid == "Metro10"
+    table.setObjectName("GameResourceBlockIconTable")
+    table.setShowGrid(False)
+    table.verticalHeader().setVisible(False)
+    table.setEditTriggers(table.EditTrigger.NoEditTriggers)
+    table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+    table.setAutoScroll(False)
+    table._mcmeta_hover_row = None  # type: ignore[attr-defined]
+    table._mcmeta_hover_bg = mcmeta_table_row_hover_bg(tid)  # type: ignore[attr-defined]
+    table._mcmeta_hover_fg = mcmeta_table_row_hover_fg_optional(tid)  # type: ignore[attr-defined]
+    table.setAlternatingRowColors(not metro10)
+    table.setItemDelegate(
+        McmetaStandardTextColumnsDelegate(
+            table, text_columns=(0, 1, 2), metro_no_zebra=metro10
+        )
+    )
+    table.setMouseTracking(True)
+    table.viewport().setMouseTracking(True)
+    table.setMinimumHeight(mcmeta_version_table_min_height_px(tid))
+    apply_mcmeta_table_viewport_fill_below_items(table, tid)
+    apply_minecraft_list_table_header_chrome(table, tid)
+
+    ctrl = McmetaStandardTableRowHoverController(table, highlight_columns=(3,))
+    ctrl.install_on_viewport()
+    return ctrl
+
+
 def reapply_mcmeta_standard_action_table_theme(
     table: QTableWidget,
     controller: McmetaStandardTableRowHoverController,

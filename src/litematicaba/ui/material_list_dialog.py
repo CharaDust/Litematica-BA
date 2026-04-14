@@ -1,4 +1,4 @@
-"""材料列表独立窗口（design §2.8）：缓存优先、异步刷新；图标列为 ``block_example.png`` 32×32 占位。"""
+"""材料列表独立窗口（design §2.8）：缓存优先、异步刷新；图标列固定 32×32，按方块资源设置解析 PNG，缺省为占位图。"""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ from litematicaba.core.material_list_cache import (
 from litematicaba.ui.pages.properties_page import PropertiesPage
 from litematicaba.ui.table.material_list_table import (
     configure_material_list_table,
-    material_list_block_icon_pixmap_32,
+    material_list_block_icon_pixmap_32_for_block,
     refresh_material_list_row_visuals,
     sync_material_list_row_heights,
 )
@@ -520,8 +520,8 @@ class MaterialListDialog(QDialog):
         else:
             brush = self._table.palette().brush(QPalette.ColorRole.Text)
         self._table.setRowCount(len(rows))
-        pm = material_list_block_icon_pixmap_32()
         for i, (bid, cnt) in enumerate(rows):
+            pm = material_list_block_icon_pixmap_32_for_block(bid)
             self._table.setCellWidget(i, 0, _material_list_icon_cell_widget(pm))
 
             name_item = QTableWidgetItem(_display_name(bid, self._cn))

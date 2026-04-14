@@ -26,7 +26,7 @@ _BLOCK_ICON_PM: QPixmap | None = None
 
 
 def material_list_block_icon_pixmap_32() -> QPixmap:
-    """材料列表图标列占位：``resources/icon/block_example.png`` 缩放到 32×32。"""
+    """材料列表缺省占位图：``resources/icon/block_example.png`` 缩放到 **32×32**。"""
     global _BLOCK_ICON_PM
     if _BLOCK_ICON_PM is not None and not _BLOCK_ICON_PM.isNull():
         return _BLOCK_ICON_PM
@@ -44,6 +44,23 @@ def material_list_block_icon_pixmap_32() -> QPixmap:
             Qt.TransformationMode.FastTransformation,
         )
     return _BLOCK_ICON_PM
+
+
+def material_list_block_icon_pixmap_32_for_block(block_id: str) -> QPixmap:
+    """按「应用到材料列表」资源解析方块 PNG；图标列**固定 32×32**，不采用列表型 ``table_list_thumb_px`` 约定。"""
+    from litematicaba.core.game_resource_block_icon import resolve_material_list_icon_path
+
+    p = resolve_material_list_icon_path(block_id)
+    if p is not None:
+        pm = QPixmap(str(p))
+        if not pm.isNull():
+            return pm.scaled(
+                32,
+                32,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            )
+    return material_list_block_icon_pixmap_32()
 
 
 def sync_material_list_row_heights(table: QTableWidget, theme_id: str) -> None:

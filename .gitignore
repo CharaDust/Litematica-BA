@@ -14,3 +14,4 @@ error.log
 /tmp
 /third_party/vscode-nbt/node_modules/
 /third_party/vscode-nbt/out/
+.obsidian/workspace.json
