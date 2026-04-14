@@ -163,6 +163,23 @@ class PropertiesPage(QWidget):
         """当前激活的投影文件路径；无文件时为 ``None``（供统计等模块读取）。"""
         return self._current_data.file_path
 
+    def material_list_region_entries_for_active_file(self) -> list[tuple[str, str]] | None:
+        """材料列表子区域下拉用 ``(显示名, litemapy 区域键)``。
+
+        与内存中当前模型、路径一致时返回，避免打开材料列表时再对大文件 ``Schematic.load``。
+        若路径不一致或尚无模型则返回 ``None``（由对话框回退异步读取）。"""
+        p = self.active_file_path()
+        if p is None or self._current_data.file_path is None:
+            return None
+        try:
+            if p.resolve() != Path(self._current_data.file_path).resolve():
+                return None
+        except OSError:
+            return None
+        if not self._current_data.regions:
+            return []
+        return [(r.name, r.source_key) for r in self._current_data.regions]
+
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         # 路径标签宽度随窗口变化，需重新计算中间省略

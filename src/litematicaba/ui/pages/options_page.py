@@ -23,7 +23,15 @@ from PySide6.QtWidgets import (
 
 from litematicaba.core.config import user_data_dir
 from litematicaba.core.render_bundle_update import show_renderer_update_info
+from litematicaba.core.material_list_icon_pixmap_cache import material_list_icon_prewarm_cache_has_entries
 from litematicaba.core.settings import (
+    BLOCK_ICON_PRELOAD_NEVER,
+    BLOCK_ICON_PRELOAD_ON_LITEMATIC,
+    BLOCK_ICON_PRELOAD_ON_MATERIAL_OR_FLAKE,
+    BLOCK_ICON_PRELOAD_STARTUP,
+    DEFAULT_BLOCK_ICON_PRELOAD_MODE,
+    MATERIAL_LIST_PREWARM_ON_LITEMATIC,
+    MATERIAL_LIST_PREWARM_ON_MATERIAL_LIST,
     NBT_EXPORT_FULL_MARGIN_DEFAULT,
     NBT_EXPORT_FULL_ORTHOGRAPHIC_DIAG_EXTRA_DEFAULT,
     NBT_EXPORT_FULL_ORTHOGRAPHIC_HALF_HEIGHT_MIN_DEFAULT,
@@ -50,6 +58,7 @@ class OptionsPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._loading = True
+        self._committed_block_icon_mode = DEFAULT_BLOCK_ICON_PRELOAD_MODE
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -91,6 +100,30 @@ class OptionsPage(QWidget):
         self._tile_view_right_padding_px.setRange(0, 300)
         self._tile_view_right_padding_px.setSuffix(" px")
         form_dev.addRow("磁贴视图右侧留白：", self._tile_view_right_padding_px)
+
+        g_perf = QGroupBox("性能与预加载")
+        form_perf = QFormLayout(g_perf)
+        perf_hint = QLabel(
+            "更改以下选项不会清除已缓存的材料列表磁盘数据，也不会清除已解码的方块图标内存；"
+            "切换「应用到材料列表」的图标包时仍会按规则使图标缓存失效。"
+        )
+        perf_hint.setWordWrap(True)
+        perf_hint.setStyleSheet("color: palette(mid);")
+        form_perf.addRow(perf_hint)
+        self._block_icon_preload = QComboBox()
+        self._block_icon_preload.addItem("软件启动时（默认）", BLOCK_ICON_PRELOAD_STARTUP)
+        self._block_icon_preload.addItem("首次加载投影文件时", BLOCK_ICON_PRELOAD_ON_LITEMATIC)
+        self._block_icon_preload.addItem("首次点击材料列表或分层时", BLOCK_ICON_PRELOAD_ON_MATERIAL_OR_FLAKE)
+        self._block_icon_preload.addItem("不加载方块图标（回退手段）", BLOCK_ICON_PRELOAD_NEVER)
+        form_perf.addRow("方块图标预加载时机：", self._block_icon_preload)
+        self._material_list_prewarm = QComboBox()
+        self._material_list_prewarm.addItem(
+            "首次加载投影文件时（默认）", MATERIAL_LIST_PREWARM_ON_LITEMATIC
+        )
+        self._material_list_prewarm.addItem(
+            "首次点击材料列表时", MATERIAL_LIST_PREWARM_ON_MATERIAL_LIST
+        )
+        form_perf.addRow("材料列表计算时机：", self._material_list_prewarm)
 
         g_render = QGroupBox("Deepslate 渲染")
         form_render = QFormLayout(g_render)
@@ -230,6 +263,7 @@ class OptionsPage(QWidget):
 
         body_lay.addWidget(g_theme)
         body_lay.addWidget(g_dev)
+        body_lay.addWidget(g_perf)
         body_lay.addWidget(g_render)
         body_lay.addWidget(g_nbt)
         body_lay.addWidget(g_nbt_export)
@@ -254,6 +288,8 @@ class OptionsPage(QWidget):
         self._nbt_export_ortho_diag.valueChanged.connect(self._persist)
         self._nbt_export_ortho_min.valueChanged.connect(self._persist)
         self._nbt_export_ortho_hmin.valueChanged.connect(self._persist)
+        self._block_icon_preload.currentIndexChanged.connect(self._on_block_icon_preload_changed)
+        self._material_list_prewarm.currentIndexChanged.connect(self._persist)
 
         self._loading = False
 
@@ -280,6 +316,11 @@ class OptionsPage(QWidget):
         self._nbt_export_ortho_diag.setValue(s.nbt_export_full_orthographic_diag_extra)
         self._nbt_export_ortho_min.setValue(s.nbt_export_full_orthographic_min_distance)
         self._nbt_export_ortho_hmin.setValue(s.nbt_export_full_orthographic_half_height_min)
+        bidx = self._block_icon_preload.findData(s.block_icon_preload_mode)
+        self._block_icon_preload.setCurrentIndex(bidx if bidx >= 0 else 0)
+        midx = self._material_list_prewarm.findData(s.material_list_prewarm_mode)
+        self._material_list_prewarm.setCurrentIndex(midx if midx >= 0 else 0)
+        self._committed_block_icon_mode = self._block_icon_preload.currentData()
         self._refresh_nbt_mcmeta_status_label()
         self._loading = False
 
@@ -305,6 +346,8 @@ class OptionsPage(QWidget):
             nbt_export_full_orthographic_diag_extra=self._nbt_export_ortho_diag.value(),
             nbt_export_full_orthographic_min_distance=self._nbt_export_ortho_min.value(),
             nbt_export_full_orthographic_half_height_min=self._nbt_export_ortho_hmin.value(),
+            block_icon_preload_mode=self._block_icon_preload.currentData(),
+            material_list_prewarm_mode=self._material_list_prewarm.currentData(),
         ).normalized()
 
     def _on_deepslate_update_clicked(self) -> None:
@@ -369,6 +412,32 @@ class OptionsPage(QWidget):
     def _on_block_icon_manage_clicked(self) -> None:
         dlg = GameResourceBlockIconDialog(self)
         dlg.exec()
+
+    def _on_block_icon_preload_changed(self, index: int) -> None:
+        if self._loading:
+            return
+        new_mode = self._block_icon_preload.itemData(index)
+        old_committed = self._committed_block_icon_mode
+        if (
+            new_mode == BLOCK_ICON_PRELOAD_STARTUP
+            and old_committed != BLOCK_ICON_PRELOAD_STARTUP
+            and not material_list_icon_prewarm_cache_has_entries()
+        ):
+            r = QMessageBox.question(
+                self,
+                "方块图标预加载",
+                "现在将立即加载图标，可能会影响性能，你确定要继续吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if r != QMessageBox.StandardButton.Yes:
+                self._loading = True
+                revert = self._block_icon_preload.findData(old_committed)
+                self._block_icon_preload.setCurrentIndex(revert if revert >= 0 else 0)
+                self._loading = False
+                return
+        self._committed_block_icon_mode = new_mode
+        self._persist()
 
     def _persist(self) -> None:
         if self._loading:

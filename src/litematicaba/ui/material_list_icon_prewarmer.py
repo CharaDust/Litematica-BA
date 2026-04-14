@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
@@ -15,6 +16,18 @@ from litematicaba.core.game_resource_block_icon import (
 from litematicaba.core.material_list_icon_pixmap_cache import store_prewarmed_scaled_pixmap
 
 _ATTACHED: MaterialListIconPrewarmer | None = None
+_MATERIAL_UI_ICON_PREWARM_HOOK: Callable[[], None] | None = None
+
+
+def register_material_ui_icon_prewarm_hook(fn: Callable[[], None] | None) -> None:
+    """主窗口登记：在首次打开材料列表或进入分层页时触发（由设置决定是否真启动预载）。"""
+    global _MATERIAL_UI_ICON_PREWARM_HOOK
+    _MATERIAL_UI_ICON_PREWARM_HOOK = fn
+
+
+def request_icon_prewarm_from_material_or_flake_ui() -> None:
+    if _MATERIAL_UI_ICON_PREWARM_HOOK is not None:
+        _MATERIAL_UI_ICON_PREWARM_HOOK()
 
 # 主线程单次只解码少量 PNG，定时器间隔让出事件循环，避免长时间「未响应」。
 _DECODE_SLICE = 10
@@ -82,21 +95,8 @@ class MaterialListIconPrewarmer(QObject):
         self._timer.setInterval(_DECODE_GAP_MS)
         self._timer.timeout.connect(self._pump_decode_slice)
 
-    def start(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.requestInterruption()
-            self._worker = None
-        self._decode_queue.clear()
-        self._active_list = None
-        self._active_i = 0
-        self._timer.stop()
-        w = _CollectPngBytesThread(self)
-        self._worker = w
-        w.batch_ready.connect(self._on_worker_batch)
-        w.done_tag.connect(self._on_worker_done_tag)
-        w.start()
-
-    def restart(self) -> None:
+    def stop(self) -> None:
+        """停止后台读盘与主线程解码队列。"""
         if self._worker is not None:
             self._worker.requestInterruption()
             self._worker = None
@@ -104,6 +104,17 @@ class MaterialListIconPrewarmer(QObject):
         self._active_list = None
         self._active_i = 0
         self._timer.stop()
+
+    def start(self) -> None:
+        self.stop()
+        w = _CollectPngBytesThread(self)
+        self._worker = w
+        w.batch_ready.connect(self._on_worker_batch)
+        w.done_tag.connect(self._on_worker_done_tag)
+        w.start()
+
+    def restart(self) -> None:
+        self.stop()
         self.start()
 
     def _on_worker_batch(self, tag: str, items: object) -> None:

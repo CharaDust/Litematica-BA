@@ -31,6 +31,12 @@ def prewarmed_scaled_pixmap_for_local_id(local_id: str | None) -> QPixmap | None
     return pm
 
 
+def material_list_icon_prewarm_cache_has_entries() -> bool:
+    """当前图标包环境下是否已有预载 pixmap（用于选项切换时的提示）。"""
+    sync_material_list_icon_pixmap_cache_tag()
+    return bool(_pixmaps)
+
+
 def store_prewarmed_scaled_pixmap(local_id: str, pm: QPixmap) -> None:
     """仅主线程调用；``local_id`` 为方块本地名（与 PNG 主文件名一致）。"""
     if not local_id or pm.isNull():

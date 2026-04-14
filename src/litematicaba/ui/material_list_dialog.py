@@ -1,4 +1,9 @@
-"""材料列表独立窗口（design §2.8）：缓存优先、异步刷新；图标列固定 32×32，按方块资源设置解析 PNG，缺省为占位图。"""
+"""材料列表独立窗口（design §2.8）：磁盘缓存优先；未过期时不重复扫描。
+
+子区域列表优先复用属性页已解析的 ``Regions``，避免对大文件再次 ``Schematic.load`` 阻塞 UI；
+仅在无法与属性页对齐时于后台线程读取键名。「重新加载」或缓存过期时后台重扫；有缓存时先以中灰色显示缓存行再刷新。
+图标列固定 32×32；大行数时分批替换图标列以减轻主线程卡顿。
+"""
 
 from __future__ import annotations
 
@@ -7,8 +12,8 @@ from datetime import datetime
 from itertools import chain
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QCloseEvent, QFontMetrics, QPalette, QPixmap, QStandardItemModel
+from PySide6.QtCore import QThread, QTimer, Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QCloseEvent, QFontMetrics, QPalette, QPixmap, QShowEvent, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -38,9 +43,11 @@ from litematicaba.core.material_list_cache import (
     save_material_cache,
 )
 from litematicaba.ui.pages.properties_page import PropertiesPage
+from litematicaba.ui.material_list_icon_prewarmer import request_icon_prewarm_from_material_or_flake_ui
 from litematicaba.ui.material_list_scan_prewarmer import MaterialListScanPrewarmer
 from litematicaba.ui.table.material_list_table import (
     configure_material_list_table,
+    material_list_block_icon_pixmap_32,
     material_list_block_icon_pixmap_32_for_block,
     refresh_material_list_row_visuals,
     sync_material_list_row_heights,
@@ -50,6 +57,9 @@ from litematicaba.ui.theme import current_theme_id
 # 材料列表导出：仅 Item + Total 两列（CSV / ASCII 文本表）
 _MIN_ITEM_W = 7
 _MIN_NUM_W = 7
+# 超过此行数时图标列先占位再在事件循环中分批替换，减轻主线程尖峰。
+_ICON_ROWS_INLINE = 400
+_ICON_COLUMN_CHUNK = 80
 
 _NAME_COL_MIN_W = 80
 _NAME_COL_PAD_H = 16
@@ -194,6 +204,26 @@ def _material_list_txt_table(title: str, rows_display: list[tuple[str, int]]) ->
     return "\n".join(lines) + "\n"
 
 
+class _RegionKeysThread(QThread):
+    """大文件时避免在主线程 ``Schematic.load`` 仅取子区域键（回退路径）。"""
+
+    done = Signal(object)  # list[tuple[str, str]] 显示名与 litemapy 键（此处相同）
+
+    def __init__(self, path: Path, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._path = path.resolve()
+
+    def run(self) -> None:  # type: ignore[override]
+        try:
+            from litemapy import Schematic
+
+            sch = Schematic.load(str(self._path))
+            keys = list(sch.regions.keys())
+        except Exception:
+            keys = []
+        self.done.emit([(k, k) for k in keys])
+
+
 class _MaterialScanThread(QThread):
     finished_ok = Signal(dict)
     failed = Signal(str)
@@ -251,6 +281,10 @@ class MaterialListDialog(QDialog):
         self._csv_source: Path | None = None
         self._pending_queue: bool = False
         self._table_gray: bool = False
+        self._pending_initial_region_name: str | None = initial_region_name
+        self._region_thread: _RegionKeysThread | None = None
+        self._region_thread_apply_force_refresh: bool = False
+        self._table_icon_fill_gen: int = 0
         app = QApplication.instance()
         self._theme_id = current_theme_id(app) if app is not None else "QTDefault"
 
@@ -298,11 +332,15 @@ class MaterialListDialog(QDialog):
         root.addWidget(self._table, 1)
 
         self._reload_from_context()
-        if initial_region_name:
-            self._select_workbook_region(initial_region_name)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        request_icon_prewarm_from_material_or_flake_ui()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._clear_prewarm_wait()
+        if self._region_thread is not None and self._region_thread.isRunning():
+            self._region_thread.requestInterruption()
         super().closeEvent(event)
 
     def _clear_prewarm_wait(self) -> None:
@@ -320,7 +358,7 @@ class MaterialListDialog(QDialog):
         self._clear_prewarm_wait()
         self._start_material_flow(force_refresh=False)
 
-    def _select_workbook_region(self, name: str) -> None:
+    def _select_workbook_region(self, name: str, *, force_refresh: bool = False) -> None:
         self._workbook.blockSignals(True)
         idx = 0
         for i in range(self._workbook.count()):
@@ -329,14 +367,15 @@ class MaterialListDialog(QDialog):
                 break
         self._workbook.setCurrentIndex(idx)
         self._workbook.blockSignals(False)
-        self._apply_workbook_selection(force_refresh=False)
+        self._apply_workbook_selection(force_refresh=force_refresh)
 
-    def _fill_region_items(self, region_keys: list[str]) -> None:
+    def _fill_region_items_from_entries(self, entries: list[tuple[str, str]]) -> None:
+        """entries：``(显示名, litemapy 区域键)``。"""
         self._workbook.blockSignals(True)
         self._workbook.clear()
         self._workbook.addItem("整个投影", None)
-        for k in region_keys:
-            self._workbook.addItem(f"选定区域：{k}", k)
+        for disp, key in entries:
+            self._workbook.addItem(f"选定区域：{disp}", key)
         self._workbook.addItem("选定层级（需分层模块）", "__DISABLED__")
         d_idx = self._workbook.count() - 1
         m = self._workbook.model()
@@ -357,21 +396,47 @@ class MaterialListDialog(QDialog):
         self._litematic_path = path.resolve()
         self._csv_mode = False
         self._csv_source = None
-        self._sync_region_combo_from_file()
-        self._apply_workbook_selection(force_refresh=force_refresh)
-
-    def _sync_region_combo_from_file(self) -> None:
-        path = self._props.active_file_path()
-        if path is None:
+        self._region_thread_apply_force_refresh = force_refresh
+        ents = self._props.material_list_region_entries_for_active_file()
+        if ents is not None:
+            self._fill_region_items_from_entries(ents)
+            if self._pending_initial_region_name is not None:
+                n = self._pending_initial_region_name
+                self._pending_initial_region_name = None
+                self._select_workbook_region(n, force_refresh=force_refresh)
+            else:
+                self._apply_workbook_selection(force_refresh=force_refresh)
             return
-        try:
-            from litemapy import Schematic
+        self._fill_region_items_from_entries([])
+        self._status.setText("正在读取子区域列表…")
+        self._start_region_keys_thread(path.resolve())
 
-            sch = Schematic.load(str(path))
-            keys = list(sch.regions.keys())
-        except Exception:
-            keys = []
-        self._fill_region_items(keys)
+    def _start_region_keys_thread(self, resolved: Path) -> None:
+        if self._region_thread is not None and self._region_thread.isRunning():
+            return
+        th = _RegionKeysThread(resolved, self)
+        self._region_thread = th
+        th.done.connect(self._on_region_keys_ready)
+        th.finished.connect(self._on_region_thread_finished)
+        th.start()
+
+    def _on_region_thread_finished(self) -> None:
+        self._region_thread = None
+
+    def _on_region_keys_ready(self, entries_obj: object) -> None:
+        entries: list[tuple[str, str]] = []
+        if isinstance(entries_obj, list):
+            for row in entries_obj:
+                if isinstance(row, (list, tuple)) and len(row) >= 2:
+                    entries.append((str(row[0]), str(row[1])))
+        self._fill_region_items_from_entries(entries)
+        fr = self._region_thread_apply_force_refresh
+        if self._pending_initial_region_name is not None:
+            n = self._pending_initial_region_name
+            self._pending_initial_region_name = None
+            self._select_workbook_region(n, force_refresh=fr)
+        else:
+            self._apply_workbook_selection(force_refresh=fr)
 
     def _current_region_param(self) -> str | None:
         data = self._workbook.currentData()
@@ -492,16 +557,28 @@ class MaterialListDialog(QDialog):
             self._pending_queue = True
             return
 
-        cached = None if force_refresh else load_material_cache(resolved, region_name=region, include_entities=inc)
+        cached = load_material_cache(resolved, region_name=region, include_entities=inc)
+        need_scan = True
         if cached is not None:
             counts, mns = cached
             stale = cache_is_stale(resolved, mns)
             self._base_rows = sorted_block_counts(counts)
-            self._fill_table(self._base_rows, gray=stale)
-            self._status.setText("已显示缓存" + ("（文件已变更，后台刷新中…）" if stale else "（后台校验中…）"))
+            if force_refresh:
+                self._fill_table(self._base_rows, gray=True)
+                self._status.setText("已从缓存显示（中灰色）；正在重新扫描…")
+            elif stale:
+                self._fill_table(self._base_rows, gray=True)
+                self._status.setText("已从缓存显示（中灰色）；文件已变更，正在后台刷新…")
+            else:
+                self._fill_table(self._base_rows, gray=False)
+                self._status.setText("已从缓存加载。")
+                need_scan = False
         else:
             self._status.setText("正在扫描投影…")
             self._table.setRowCount(0)
+
+        if not need_scan:
+            return
 
         self._thread = _MaterialScanThread(
             resolved,
@@ -550,22 +627,44 @@ class MaterialListDialog(QDialog):
         QMessageBox.warning(self, "材料列表", msg)
 
     def _fill_table(self, rows: list[tuple[str, int]], *, gray: bool) -> None:
+        self._table_icon_fill_gen += 1
+        fill_gen = self._table_icon_fill_gen
+
         self._table_gray = gray
         mult = self._spin_mult.value()
         if gray:
             brush = QBrush(QColor(140, 140, 140))
         else:
             brush = self._table.palette().brush(QPalette.ColorRole.Text)
-        self._table.setRowCount(len(rows))
-        for i, (bid, cnt) in enumerate(rows):
-            pm = material_list_block_icon_pixmap_32_for_block(bid)
-            self._table.setCellWidget(i, 0, _material_list_icon_cell_widget(pm))
+        n = len(rows)
+        self._table.setRowCount(n)
 
+        if n <= _ICON_ROWS_INLINE:
+            for i, (bid, cnt) in enumerate(rows):
+                pm = material_list_block_icon_pixmap_32_for_block(bid)
+                self._table.setCellWidget(i, 0, _material_list_icon_cell_widget(pm))
+
+                name_item = QTableWidgetItem(_display_name(bid, self._cn))
+                name_item.setForeground(brush)
+                name_item.setData(Qt.ItemDataRole.UserRole, bid)
+                self._table.setItem(i, 1, name_item)
+
+                total_item = QTableWidgetItem(str(cnt * mult))
+                total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                total_item.setForeground(brush)
+                self._table.setItem(i, 2, total_item)
+            _sync_material_list_name_column_width(self._table)
+            sync_material_list_row_heights(self._table, self._theme_id)
+            refresh_material_list_row_visuals(self._table)
+            return
+
+        ph = material_list_block_icon_pixmap_32()
+        for i, (bid, cnt) in enumerate(rows):
+            self._table.setCellWidget(i, 0, _material_list_icon_cell_widget(QPixmap(ph)))
             name_item = QTableWidgetItem(_display_name(bid, self._cn))
             name_item.setForeground(brush)
             name_item.setData(Qt.ItemDataRole.UserRole, bid)
             self._table.setItem(i, 1, name_item)
-
             total_item = QTableWidgetItem(str(cnt * mult))
             total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             total_item.setForeground(brush)
@@ -573,6 +672,25 @@ class MaterialListDialog(QDialog):
         _sync_material_list_name_column_width(self._table)
         sync_material_list_row_heights(self._table, self._theme_id)
         refresh_material_list_row_visuals(self._table)
+        self._icon_chunk_rows = rows
+        self._icon_chunk_idx = 0
+        QTimer.singleShot(0, lambda: self._pump_material_list_icon_column(fill_gen))
+
+    def _pump_material_list_icon_column(self, gen: int) -> None:
+        if gen != self._table_icon_fill_gen:
+            return
+        rows = self._icon_chunk_rows
+        i0 = self._icon_chunk_idx
+        i1 = min(i0 + _ICON_COLUMN_CHUNK, len(rows))
+        for i in range(i0, i1):
+            bid, _cnt = rows[i]
+            pm = material_list_block_icon_pixmap_32_for_block(bid)
+            self._table.setCellWidget(i, 0, _material_list_icon_cell_widget(pm))
+        self._icon_chunk_idx = i1
+        if i1 < len(rows):
+            QTimer.singleShot(0, lambda: self._pump_material_list_icon_column(gen))
+        else:
+            refresh_material_list_row_visuals(self._table)
 
     def _refresh_multiplier_only(self) -> None:
         if not self._base_rows:

@@ -36,6 +36,27 @@ NBT_EXPORT_FULL_ORTHOGRAPHIC_MIN_DISTANCE_DEFAULT = 12.0
 NBT_EXPORT_FULL_ORTHOGRAPHIC_HALF_HEIGHT_MIN_DEFAULT = 2.5
 NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT = 48 * 48 * 48
 
+# 性能与预加载（选项「性能与预加载」）
+BLOCK_ICON_PRELOAD_STARTUP = "startup"
+BLOCK_ICON_PRELOAD_ON_LITEMATIC = "on_litematic_load"
+BLOCK_ICON_PRELOAD_ON_MATERIAL_OR_FLAKE = "on_material_or_flake"
+BLOCK_ICON_PRELOAD_NEVER = "never"
+VALID_BLOCK_ICON_PRELOAD_MODES = (
+    BLOCK_ICON_PRELOAD_STARTUP,
+    BLOCK_ICON_PRELOAD_ON_LITEMATIC,
+    BLOCK_ICON_PRELOAD_ON_MATERIAL_OR_FLAKE,
+    BLOCK_ICON_PRELOAD_NEVER,
+)
+DEFAULT_BLOCK_ICON_PRELOAD_MODE = BLOCK_ICON_PRELOAD_STARTUP
+
+MATERIAL_LIST_PREWARM_ON_LITEMATIC = "on_litematic_load"
+MATERIAL_LIST_PREWARM_ON_MATERIAL_LIST = "on_material_list_open"
+VALID_MATERIAL_LIST_PREWARM_MODES = (
+    MATERIAL_LIST_PREWARM_ON_LITEMATIC,
+    MATERIAL_LIST_PREWARM_ON_MATERIAL_LIST,
+)
+DEFAULT_MATERIAL_LIST_PREWARM_MODE = MATERIAL_LIST_PREWARM_ON_LITEMATIC
+
 
 @dataclass
 class AppSettings:
@@ -65,9 +86,23 @@ class AppSettings:
     nbt_export_full_orthographic_half_height_min: float = NBT_EXPORT_FULL_ORTHOGRAPHIC_HALF_HEIGHT_MIN_DEFAULT
     # NBT 3D：触发“大结构渲染警告”前的体素数量阈值（x*y*z）
     nbt_viewer_large_structure_threshold: int = NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT
+    # 方块图标后台预载策略；不改为清除已解码的内存缓存（切换图标包仍会按逻辑失效）。
+    block_icon_preload_mode: str = DEFAULT_BLOCK_ICON_PRELOAD_MODE
+    # 材料列表「整个投影」扫描时机；不改为清除磁盘材料缓存。
+    material_list_prewarm_mode: str = DEFAULT_MATERIAL_LIST_PREWARM_MODE
 
     def normalized(self) -> AppSettings:
         t = self.theme_id if self.theme_id in VALID_THEMES else DEFAULT_THEME
+        bim = (
+            self.block_icon_preload_mode
+            if self.block_icon_preload_mode in VALID_BLOCK_ICON_PRELOAD_MODES
+            else DEFAULT_BLOCK_ICON_PRELOAD_MODE
+        )
+        mlm = (
+            self.material_list_prewarm_mode
+            if self.material_list_prewarm_mode in VALID_MATERIAL_LIST_PREWARM_MODES
+            else DEFAULT_MATERIAL_LIST_PREWARM_MODE
+        )
         return AppSettings(
             theme_id=t,
             show_ui_test_nav=self.show_ui_test_nav,
@@ -107,6 +142,8 @@ class AppSettings:
             nbt_viewer_large_structure_threshold=max(
                 1_000, min(1_000_000_000, int(self.nbt_viewer_large_structure_threshold))
             ),
+            block_icon_preload_mode=bim,
+            material_list_prewarm_mode=mlm,
         )
 
 
@@ -184,6 +221,12 @@ def load_settings() -> AppSettings:
                 "nbt_viewer_large_structure_threshold",
                 NBT_VIEWER_LARGE_STRUCTURE_THRESHOLD_DEFAULT,
             )
+        ),
+        block_icon_preload_mode=str(
+            raw.get("block_icon_preload_mode", DEFAULT_BLOCK_ICON_PRELOAD_MODE)
+        ),
+        material_list_prewarm_mode=str(
+            raw.get("material_list_prewarm_mode", DEFAULT_MATERIAL_LIST_PREWARM_MODE)
         ),
     ).normalized()
 

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from litematicaba.ui.material_list_dialog import MaterialListDialog
+from litematicaba.ui.material_list_icon_prewarmer import request_icon_prewarm_from_material_or_flake_ui
 from litematicaba.ui.material_list_scan_prewarmer import MaterialListScanPrewarmer
 from litematicaba.ui.pages.properties_page import PropertiesPage
 
@@ -119,6 +120,7 @@ class FlakePage(QWidget):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        request_icon_prewarm_from_material_or_flake_ui()
         self._sync_path_label()
         if self._region_combo.count() == 0:
             self._sync_region_combo()
