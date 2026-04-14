@@ -31,4 +31,5 @@ def main() -> int:
 
     window = MainWindow()
     window.show()
+    window.schedule_material_list_icon_prewarm()
     return app.exec()

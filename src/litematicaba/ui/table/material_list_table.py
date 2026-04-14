@@ -48,7 +48,16 @@ def material_list_block_icon_pixmap_32() -> QPixmap:
 
 def material_list_block_icon_pixmap_32_for_block(block_id: str) -> QPixmap:
     """按「应用到材料列表」资源解析方块 PNG；图标列**固定 32×32**，不采用列表型 ``table_list_thumb_px`` 约定。"""
-    from litematicaba.core.game_resource_block_icon import resolve_material_list_icon_path
+    from litematicaba.core.game_resource_block_icon import (
+        normalize_material_list_block_local_id,
+        resolve_material_list_icon_path,
+    )
+    from litematicaba.core.material_list_icon_pixmap_cache import prewarmed_scaled_pixmap_for_local_id
+
+    lid = normalize_material_list_block_local_id(block_id)
+    hit = prewarmed_scaled_pixmap_for_local_id(lid)
+    if hit is not None:
+        return hit
 
     p = resolve_material_list_icon_path(block_id)
     if p is not None:

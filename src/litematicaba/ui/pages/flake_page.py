@@ -19,15 +19,23 @@ from PySide6.QtWidgets import (
 )
 
 from litematicaba.ui.material_list_dialog import MaterialListDialog
+from litematicaba.ui.material_list_scan_prewarmer import MaterialListScanPrewarmer
 from litematicaba.ui.pages.properties_page import PropertiesPage
 
 
 class FlakePage(QWidget):
     """FR-F.1～F.4、F.6：视图区占位 + 子区域 + 层级滑条 + 材料列表。"""
 
-    def __init__(self, properties_page: PropertiesPage, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        properties_page: PropertiesPage,
+        parent: QWidget | None = None,
+        *,
+        material_scan_prewarmer: MaterialListScanPrewarmer | None = None,
+    ) -> None:
         super().__init__(parent)
         self._props = properties_page
+        self._material_scan_prewarmer = material_scan_prewarmer
 
         self._lbl_path = QLabel("请在「属性」页加载 .litematic。")
         self._lbl_path.setWordWrap(True)
@@ -124,4 +132,9 @@ class FlakePage(QWidget):
             QMessageBox.information(self, "材料列表", "请先在「属性」页打开一个投影文件。")
             return
         region = self._selected_region_name()
-        MaterialListDialog.open_for_properties(self._props, self, initial_region_name=region)
+        MaterialListDialog.open_for_properties(
+            self._props,
+            self,
+            initial_region_name=region,
+            material_scan_prewarmer=self._material_scan_prewarmer,
+        )

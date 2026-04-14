@@ -8,7 +8,7 @@ from itertools import chain
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFontMetrics, QPalette, QPixmap, QStandardItemModel
+from PySide6.QtGui import QBrush, QColor, QCloseEvent, QFontMetrics, QPalette, QPixmap, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -38,6 +38,7 @@ from litematicaba.core.material_list_cache import (
     save_material_cache,
 )
 from litematicaba.ui.pages.properties_page import PropertiesPage
+from litematicaba.ui.material_list_scan_prewarmer import MaterialListScanPrewarmer
 from litematicaba.ui.table.material_list_table import (
     configure_material_list_table,
     material_list_block_icon_pixmap_32_for_block,
@@ -231,6 +232,7 @@ class MaterialListDialog(QDialog):
         parent: QWidget | None = None,
         *,
         initial_region_name: str | None = None,
+        material_scan_prewarmer: MaterialListScanPrewarmer | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("MaterialListDialog")
@@ -238,6 +240,8 @@ class MaterialListDialog(QDialog):
         self.setMinimumSize(560, 420)
         self.setModal(False)
         self._props = properties_page
+        self._scan_prewarmer = material_scan_prewarmer
+        self._waiting_prewarm_path: Path | None = None
         self._cn = _load_block_cn_map()
         self._thread: _MaterialScanThread | None = None
         self._base_rows: list[tuple[str, int]] = []
@@ -296,6 +300,25 @@ class MaterialListDialog(QDialog):
         self._reload_from_context()
         if initial_region_name:
             self._select_workbook_region(initial_region_name)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._clear_prewarm_wait()
+        super().closeEvent(event)
+
+    def _clear_prewarm_wait(self) -> None:
+        if self._scan_prewarmer is not None and self._waiting_prewarm_path is not None:
+            try:
+                self._scan_prewarmer.finished_for_path.disconnect(self._on_wait_prewarm_done)
+            except (TypeError, RuntimeError):
+                pass
+        self._waiting_prewarm_path = None
+
+    def _on_wait_prewarm_done(self, p: Path) -> None:
+        w = self._waiting_prewarm_path
+        if w is None or p.resolve() != w.resolve():
+            return
+        self._clear_prewarm_wait()
+        self._start_material_flow(force_refresh=False)
 
     def _select_workbook_region(self, name: str) -> None:
         self._workbook.blockSignals(True)
@@ -451,6 +474,20 @@ class MaterialListDialog(QDialog):
         inc = self._cb_entities.isChecked()
         region = self._region_name
 
+        if (
+            self._scan_prewarmer is not None
+            and not self._csv_mode
+            and region is None
+            and not inc
+            and self._scan_prewarmer.is_busy_for(resolved)
+        ):
+            self._clear_prewarm_wait()
+            self._waiting_prewarm_path = resolved
+            self._status.setText("后台正在扫描整个投影，与打开材料列表共用进度…")
+            self._table.setRowCount(0)
+            self._scan_prewarmer.finished_for_path.connect(self._on_wait_prewarm_done)
+            return
+
         if self._thread is not None and self._thread.isRunning():
             self._pending_queue = True
             return
@@ -597,11 +634,13 @@ class MaterialListDialog(QDialog):
         parent: QWidget | None = None,
         *,
         initial_region_name: str | None = None,
+        material_scan_prewarmer: MaterialListScanPrewarmer | None = None,
     ) -> MaterialListDialog:
         dlg = MaterialListDialog(
             properties_page,
             parent,
             initial_region_name=initial_region_name,
+            material_scan_prewarmer=material_scan_prewarmer,
         )
         dlg.show()
         return dlg

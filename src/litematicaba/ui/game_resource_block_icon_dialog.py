@@ -34,6 +34,7 @@ from litematicaba.core.game_resource_block_icon import (
     set_active_layering,
     set_active_material_list,
 )
+from litematicaba.ui.material_list_icon_prewarmer import restart_material_list_icon_prewarm
 from litematicaba.ui.theme import current_theme_id
 from litematicaba.ui.widgets.mcmeta_standard_table import (
     McmetaStandardTableCellHost,
@@ -256,6 +257,7 @@ class GameResourceBlockIconDialog(QDialog):
             False,
             "已写入 block_icon/installed.json。站点为动态网页，批量方块图标自动拉取将在后续版本接入。",
         )
+        restart_material_list_icon_prewarm()
 
     def _on_vault_err(self, err: str) -> None:
         self._vault_worker = None
@@ -267,10 +269,12 @@ class GameResourceBlockIconDialog(QDialog):
             self._installed = clear_active_material_list()
             self._refresh_table()
             self._set_busy(False, "已应用到材料列表：内建 2D")
+            restart_material_list_icon_prewarm()
             return
         self._installed = set_active_material_list(item_id)
         self._refresh_table()
         self._set_busy(False, "已应用到材料列表")
+        restart_material_list_icon_prewarm()
 
     def _on_apply_layering(self, item_id: str) -> None:
         if item_id == BLOCK_SOURCE_BUILTIN:

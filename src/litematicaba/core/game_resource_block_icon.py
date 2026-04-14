@@ -83,12 +83,33 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# 随安装包内 ``block/`` 大版本变更时递增，以触发重新种子化。
+_BLOCK_2D_INITIAL_SEED_VERSION = "1"
+_BLOCK_2D_SEED_SENTINEL = ".lba_block_2d_seed"
+
+
 def ensure_initial_block_2d_seeded() -> None:
-    """首次将安装包内 ``block/`` 树复制到 ``block_2d/initial``（与语言内建逻辑一致）。"""
-    src_root = _bundled_block_dir()
+    """首次将安装包内 ``block/`` 树复制到 ``block_2d/initial``（与语言内建逻辑一致）。
+
+    已完成后写入哨兵；后续调用立即返回，避免每次 ``rglob`` 整棵源树导致长时间主线程卡顿。
+    """
     dst_root = block_2d_initial_dir()
     dst_root.mkdir(parents=True, exist_ok=True)
+    sentinel = dst_root / _BLOCK_2D_SEED_SENTINEL
+    try:
+        if sentinel.is_file():
+            ver = sentinel.read_text(encoding="utf-8").strip()
+            if ver == _BLOCK_2D_INITIAL_SEED_VERSION:
+                return
+    except OSError:
+        pass
+
+    src_root = _bundled_block_dir()
     if not src_root.is_dir():
+        try:
+            sentinel.write_text(_BLOCK_2D_INITIAL_SEED_VERSION, encoding="utf-8")
+        except OSError:
+            pass
         return
     for path in src_root.rglob("*"):
         if not path.is_file():
@@ -102,6 +123,10 @@ def ensure_initial_block_2d_seeded() -> None:
             dst.write_bytes(path.read_bytes())
         except OSError:
             continue
+    try:
+        sentinel.write_text(_BLOCK_2D_INITIAL_SEED_VERSION, encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _entry_from_dict(row: dict) -> InstalledBlockVisual | None:
@@ -438,6 +463,11 @@ def _material_list_icon_resolution_state() -> tuple[str, Path]:
         parts.append("0")
     parts.append(_installed_json_fingerprint())
     return "|".join(parts), root
+
+
+def material_list_icon_resolution_tag() -> str:
+    """与 ``resolve_material_list_icon_path`` 的环境标签一致；用于失效材料列表 pixmap 预载缓存。"""
+    return _material_list_icon_resolution_state()[0]
 
 
 def resolve_material_list_icon_path(block_id: str) -> Path | None:

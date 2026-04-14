@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QGuiApplication, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -14,6 +17,11 @@ from PySide6.QtWidgets import (
 )
 
 from litematicaba.core.settings import AppSettings, load_settings
+from litematicaba.ui.material_list_icon_prewarmer import (
+    MaterialListIconPrewarmer,
+    attach_material_list_icon_prewarmer,
+)
+from litematicaba.ui.material_list_scan_prewarmer import MaterialListScanPrewarmer
 from litematicaba.ui.pages import (
     FlakePage,
     HomePage,
@@ -62,10 +70,23 @@ class MainWindow(QWidget):
         self._stack.addWidget(LibraryPage())
         self._properties_page = PropertiesPage()
         self._stack.addWidget(self._properties_page)
-        self._statistics_page = StatisticsPage(self._properties_page)
+        self._material_list_scan_prewarmer = MaterialListScanPrewarmer(self)
+        self._properties_page.active_file_changed.connect(
+            lambda s: self._material_list_scan_prewarmer.schedule(Path(s))
+        )
+        self._statistics_page = StatisticsPage(
+            self._properties_page,
+            material_scan_prewarmer=self._material_list_scan_prewarmer,
+        )
         self._stack.addWidget(self._statistics_page)
-        self._stack.addWidget(FlakePage(self._properties_page))
-        self._render_page = RenderPage(self._properties_page, app_settings=self._settings)
+        self._stack.addWidget(
+            FlakePage(self._properties_page, material_scan_prewarmer=self._material_list_scan_prewarmer)
+        )
+        self._render_page = RenderPage(
+            self._properties_page,
+            app_settings=self._settings,
+            material_scan_prewarmer=self._material_list_scan_prewarmer,
+        )
         self._stack.addWidget(self._render_page)
         self._stack.addWidget(ReplacePage())
         self._ui_test_page = UiTestPage(
@@ -165,11 +186,17 @@ class MainWindow(QWidget):
         self._widget_inspector.set_enabled(self._settings.show_widget_inspector)
         self._perf_test = PerfTestController(self)
         self._perf_test.set_enabled(self._settings.perf_test_overlay)
+        self._material_list_icon_prewarmer = MaterialListIconPrewarmer(self)
+        attach_material_list_icon_prewarmer(self._material_list_icon_prewarmer)
         self._btn_home.setChecked(True)
         self._stack.setCurrentIndex(PAGE_HOME)
 
         # 避免子控件（如主页 Logo）曾出现过大 minimumSize 后把整窗最小宽度锁死
         self.setMinimumSize(0, 0)
+
+    def schedule_material_list_icon_prewarm(self) -> None:
+        """窗口先完成首帧绘制后再预载图标，减轻与冷启动争用。"""
+        QTimer.singleShot(1200, self._material_list_icon_prewarmer.start)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
