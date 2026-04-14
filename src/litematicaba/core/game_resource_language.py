@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -52,9 +51,7 @@ def _github_dir() -> Path:
 
 
 def _bundled_lang_file(name: str) -> Path:
-    # 打包后内置资源位于 _MEIPASS；开发环境位于仓库 lang/。
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return Path(getattr(sys, "_MEIPASS")) / "lang" / name
+    # 与 legacy_statistics 等一致：project_root() 在 frozen 下为 _MEIPASS。
     return project_root() / "lang" / name
 
 

@@ -26,6 +26,7 @@ from litematicaba.ui.widgets.mcmeta_standard_table import (
     McmetaStandardTableCellHost,
     McmetaStandardTableRowHoverController,
     apply_mcmeta_standard_table_row_heights,
+    clear_mcmeta_table_current_cell,
     configure_mcmeta_standard_action_table,
     mcmeta_standard_wrap_action_button,
 )
@@ -120,6 +121,7 @@ class McmetaVersionPickerDialog(QDialog):
         self._hover_ctrl = configure_mcmeta_standard_action_table(
             self._table, tid, column_labels=("版本", "", "")
         )
+        self._table.setObjectName("OptionsMetaDownloadTable")
         self._apply_mcmeta_table_row_heights()
         lay.addWidget(self._table, 1)
 
@@ -194,6 +196,7 @@ class McmetaVersionPickerDialog(QDialog):
             )
         self._apply_mcmeta_table_row_heights()
         self._hover_ctrl.set_hover_row(None)
+        clear_mcmeta_table_current_cell(self._table)
         self._apply_filter()
 
     def _on_catalog_ready(self, catalog: object) -> None:

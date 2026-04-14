@@ -363,10 +363,11 @@ class PropertiesPage(QWidget):
         app = QApplication.instance()
         _tid = current_theme_id(app) if app is not None else "QTDefault"
         self._regions_table = ThemedPlainQTableWidget(theme_id=_tid)
+        self._regions_table.setObjectName("PropertiesRegionTable")
         self._regions_table.setColumnCount(7)
         self._regions_table.setHorizontalHeaderLabels(
             [
-                "区域名称",
+                "区域名称（双击修改）",
                 "尺寸 x",
                 "尺寸 y",
                 "尺寸 z",

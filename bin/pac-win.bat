@@ -75,6 +75,7 @@ if "!MODE!"=="full" (
     --hidden-import PySide6.QtSvg ^
     --add-data "%ROOT%\src\litematicaba\ui\resources;litematicaba\ui\resources" ^
     --add-data "%ROOT%\src\litematicaba\resources\web;litematicaba\resources\web" ^
+    --add-data "%ROOT%\lang;lang" ^
     --add-data "%ROOT%\logo;logo" ^
     "%ROOT%\src\litematicaba\__main__.py"
 ) else (

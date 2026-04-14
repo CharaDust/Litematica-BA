@@ -1,4 +1,4 @@
-"""材料列表独立窗口（design §2.8）：缓存优先、异步刷新；图标列为 32×32 占位。"""
+"""材料列表独立窗口（design §2.8）：缓存优先、异步刷新；图标列为 ``block_example.png`` 32×32 占位。"""
 
 from __future__ import annotations
 
@@ -8,9 +8,10 @@ from itertools import chain
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPalette, QPixmap, QStandardItemModel
+from PySide6.QtGui import QBrush, QColor, QFontMetrics, QPalette, QPixmap, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -37,21 +38,55 @@ from litematicaba.core.material_list_cache import (
     save_material_cache,
 )
 from litematicaba.ui.pages.properties_page import PropertiesPage
-
-_PLACEHOLDER_PM: QPixmap | None = None
+from litematicaba.ui.table.material_list_table import (
+    configure_material_list_table,
+    material_list_block_icon_pixmap_32,
+    refresh_material_list_row_visuals,
+    sync_material_list_row_heights,
+)
+from litematicaba.ui.theme import current_theme_id
 
 # 材料列表导出：仅 Item + Total 两列（CSV / ASCII 文本表）
 _MIN_ITEM_W = 7
 _MIN_NUM_W = 7
 
+_NAME_COL_MIN_W = 80
+_NAME_COL_PAD_H = 16
 
-def _placeholder_32() -> QPixmap:
-    global _PLACEHOLDER_PM
-    if _PLACEHOLDER_PM is None or _PLACEHOLDER_PM.isNull():
-        pm = QPixmap(32, 32)
-        pm.fill(QColor(120, 120, 120, 90))
-        _PLACEHOLDER_PM = pm
-    return _PLACEHOLDER_PM
+
+def _material_list_icon_cell_widget(pm: QPixmap) -> QWidget:
+    """图标列：单元格内水平垂直居中（表格对 ``cellWidget`` 默认左上对齐）。"""
+    icon_label = QLabel()
+    icon_label.setPixmap(pm)
+    icon_label.setFixedSize(32, 32)
+    icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    wrap = QWidget()
+    outer = QVBoxLayout(wrap)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(0)
+    outer.addStretch(1)
+    inner = QHBoxLayout()
+    inner.setContentsMargins(0, 0, 0, 0)
+    inner.setSpacing(0)
+    inner.addStretch(1)
+    inner.addWidget(icon_label)
+    inner.addStretch(1)
+    outer.addLayout(inner)
+    outer.addStretch(1)
+    return wrap
+
+
+def _sync_material_list_name_column_width(table: QTableWidget) -> None:
+    """名称列宽度：表头与各行显示名中最长一行的像素宽度 + 边距。"""
+    hi = table.horizontalHeaderItem(1)
+    header_text = hi.text() if hi is not None else "名称"
+    max_w = QFontMetrics(table.horizontalHeader().font()).horizontalAdvance(header_text)
+    fm = QFontMetrics(table.font())
+    for r in range(table.rowCount()):
+        it = table.item(r, 1)
+        if it is not None:
+            max_w = max(max_w, fm.horizontalAdvance(it.text()))
+    table.setColumnWidth(1, max(_NAME_COL_MIN_W, max_w + _NAME_COL_PAD_H))
 
 
 def _load_block_cn_map() -> dict[str, str]:
@@ -198,6 +233,7 @@ class MaterialListDialog(QDialog):
         initial_region_name: str | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setObjectName("MaterialListDialog")
         self.setWindowTitle("材料列表")
         self.setMinimumSize(560, 420)
         self.setModal(False)
@@ -211,6 +247,8 @@ class MaterialListDialog(QDialog):
         self._csv_source: Path | None = None
         self._pending_queue: bool = False
         self._table_gray: bool = False
+        app = QApplication.instance()
+        self._theme_id = current_theme_id(app) if app is not None else "QTDefault"
 
         top = QHBoxLayout()
         self._workbook = QComboBox()
@@ -247,6 +285,7 @@ class MaterialListDialog(QDialog):
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setColumnWidth(0, 40)
         self._table.horizontalHeader().setStretchLastSection(True)
+        configure_material_list_table(self._table, self._theme_id)
 
         root = QVBoxLayout(self)
         root.addLayout(top)
@@ -481,13 +520,9 @@ class MaterialListDialog(QDialog):
         else:
             brush = self._table.palette().brush(QPalette.ColorRole.Text)
         self._table.setRowCount(len(rows))
-        pm = _placeholder_32()
+        pm = material_list_block_icon_pixmap_32()
         for i, (bid, cnt) in enumerate(rows):
-            icon_label = QLabel()
-            icon_label.setPixmap(pm)
-            icon_label.setFixedSize(32, 32)
-            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._table.setCellWidget(i, 0, icon_label)
+            self._table.setCellWidget(i, 0, _material_list_icon_cell_widget(pm))
 
             name_item = QTableWidgetItem(_display_name(bid, self._cn))
             name_item.setForeground(brush)
@@ -498,7 +533,9 @@ class MaterialListDialog(QDialog):
             total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             total_item.setForeground(brush)
             self._table.setItem(i, 2, total_item)
-            self._table.setRowHeight(i, 36)
+        _sync_material_list_name_column_width(self._table)
+        sync_material_list_row_heights(self._table, self._theme_id)
+        refresh_material_list_row_visuals(self._table)
 
     def _refresh_multiplier_only(self) -> None:
         if not self._base_rows:

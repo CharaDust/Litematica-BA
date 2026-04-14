@@ -34,9 +34,9 @@ src/litematicaba/resources/web/nbt-viewer/lba_nbt_view_preset_bridge.js
 src/litematicaba/resources/web/vendor/deepslate.umd.js
 src/litematicaba/resources/web/vendor/gl-matrix-min.js
 src/litematicaba/ui/__init__.py
+src/litematicaba/ui/game_resource_language_dialog.py
 src/litematicaba/ui/main_window.py
 src/litematicaba/ui/material_list_dialog.py
-src/litematicaba/ui/game_resource_language_dialog.py
 src/litematicaba/ui/mcmeta_version_picker_dialog.py
 src/litematicaba/ui/perf_test_overlay.py
 src/litematicaba/ui/theme.py
@@ -79,6 +79,7 @@ src/litematicaba/ui/themes/metro8.py
 src/litematicaba/ui/themes/minecraft.py
 src/litematicaba/ui/themes/sidebar_nav_win10.py
 src/litematicaba/ui/widgets/__init__.py
+src/litematicaba/ui/widgets/mcmeta_standard_table.py
 src/litematicaba/ui/widgets/nav_expand.py
 src/litematicaba/ui/widgets/nav_item.py
 src/litematicaba/ui/widgets/themed_plain_table.py
