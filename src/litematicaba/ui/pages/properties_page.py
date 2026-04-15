@@ -20,14 +20,20 @@
 
 from __future__ import annotations
 
+import array
+import multiprocessing
+import pickle
+import threading
 from datetime import datetime
 from pathlib import Path
+from queue import Empty
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -47,16 +53,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from litematicaba.core.settings import AppSettings, DEFAULT_LITEMATIC_ASYNC_LOAD_MIN_BYTES
 from litematicaba.core.snbt_properties import (
     RegionInfo,
     SnbtProperties,
     copy_snbt_properties,
     load_snbt_properties,
+    mp_load_snbt_properties_for_ui,
     regions_after_save_commit,
     save_snbt_properties,
 )
 from litematicaba.ui.theme import current_theme_id
 from litematicaba.ui.widgets.themed_plain_table import ThemedPlainQTableWidget
+
+
+# 超过该像素数则不构建界面预览图（仍保留 SNBT 中的原始列表供保存）
+_MAX_PREVIEW_PIXELS_SHOW = 40_000
 
 
 class _PreviewCanvas(QFrame):
@@ -97,6 +109,81 @@ class _PreviewCanvas(QFrame):
         painter.drawPixmap(x, y, fitted)
 
 
+class _LitematicLoadWaitDialog(QDialog):
+    """大文件加载提示：勿用 ``QProgressDialog`` 的 0–0 忙碌范围，默认 ``autoClose`` 会误判为已完成而瞬间关闭。"""
+
+    def __init__(self, parent: QWidget | None, file_name: str, size_kb: float) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("加载投影")
+        self.setModal(True)
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        lay = QVBoxLayout(self)
+        lbl = QLabel(f"正在加载…\n{file_name}\n约 {size_kb:.1f} KB")
+        lbl.setWordWrap(True)
+        lay.addWidget(lbl)
+        btn = QPushButton("中断")
+        lay.addWidget(btn)
+        btn.clicked.connect(self.reject)
+
+
+class _SnbtLoadWorker(QThread):
+    """在 **子进程** 中执行 ``load_snbt_properties``，避免与 Qt 主进程争夺 CPython GIL 导致整窗未响应。
+
+    ``QThread`` 仅负责 ``join`` 子进程与反序列化；主线程事件循环可继续处理重绘与加载对话框。
+    """
+
+    finished_ok = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, file_path: str | Path) -> None:
+        super().__init__()
+        self._file_path = Path(file_path)
+        self._child_proc: multiprocessing.Process | None = None
+        self._proc_lock = threading.Lock()
+
+    def abort_child_process(self) -> None:
+        """从 UI 线程调用：终止仍在运行的子进程（例如用户点击「中断」）。"""
+        with self._proc_lock:
+            proc = self._child_proc
+        if proc is not None and proc.is_alive():
+            proc.terminate()
+
+    def run(self) -> None:  # type: ignore[override]
+        ctx = multiprocessing.get_context("spawn")
+        rq = ctx.Queue(maxsize=1)
+        proc = ctx.Process(
+            target=mp_load_snbt_properties_for_ui,
+            args=(str(self._file_path.resolve()), rq),
+        )
+        with self._proc_lock:
+            self._child_proc = proc
+        proc.start()
+        proc.join()
+        exit_code = proc.exitcode
+        with self._proc_lock:
+            self._child_proc = None
+
+        try:
+            kind, payload = rq.get_nowait()
+        except Empty:
+            if exit_code == 0:
+                self.failed.emit("加载失败（进程已结束但未返回数据）")
+            else:
+                self.failed.emit("加载已中断")
+            return
+
+        if kind == "err":
+            self.failed.emit(str(payload))
+            return
+
+        try:
+            data = pickle.loads(payload)
+        except Exception as exc:
+            self.failed.emit(f"反序列化失败：{exc}")
+            return
+        self.finished_ok.emit(data)
+
+
 class PropertiesPage(QWidget):
     """主属性页：中间内容为可滚动区域，底部操作按钮条固定在页面下沿（不参与滚动）。"""
 
@@ -107,7 +194,7 @@ class PropertiesPage(QWidget):
         """尺寸、体积、版本号等纯数字只读框：文本右对齐便于纵列对比位数。"""
         w.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-    def __init__(self) -> None:
+    def __init__(self, app_settings: AppSettings | None = None) -> None:
         super().__init__()
         # 初次构建 UI 期间为 True，避免 setText 等触发 _mark_dirty
         self._loading = True
@@ -115,10 +202,25 @@ class PropertiesPage(QWidget):
         self._current_data = SnbtProperties()
         # 内存中的预览图（ARGB）；与文件里 PreviewImageData 列表互转
         self._preview_image = QImage()
+        # True：保存时用 ``_current_data.preview_image_data``（可能与界面缩略图分辨率不同）
+        self._save_preview_from_model_list = False
         # 完整路径提示（含未保存星号）；显示用中间省略，完整内容在 ToolTip
         self._full_file_hint_text = ""
         # 成功 load 后的元数据副本，供「恢复默认值」撤销自打开以来的编辑（保存后亦不自动刷新此快照）
         self._baseline_snapshot: SnbtProperties | None = None
+        # 异步打开 .litematic：递增序号丢弃过期线程结果；加载中禁用部分按钮并显示等待光标
+        self._snbt_load_seq = 0
+        self._snbt_load_busy = False
+        self._snbt_load_wait_cursor_pushed = False
+        self._load_thread: _SnbtLoadWorker | None = None
+        self._snbt_progress_dialog: QDialog | None = None
+        # 异步加载大文件时，在路径标签上显示「加载中…」指向的目标（与 ``_current_data`` 可能尚未切换）
+        self._async_load_target_path: Path | None = None
+        self._litematic_async_load_min_bytes = (
+            int(app_settings.litematic_async_load_min_bytes)
+            if app_settings is not None
+            else DEFAULT_LITEMATIC_ASYNC_LOAD_MIN_BYTES
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -159,6 +261,10 @@ class PropertiesPage(QWidget):
         # 允许 QLineEdit 在窄布局下收缩，避免把整行撑得过宽
         self._apply_line_edit_horizontal_shrink()
 
+    def apply_app_settings(self, s: AppSettings) -> None:
+        """主窗口在选项变更时调用，更新投影加载阈值（字节）。"""
+        self._litematic_async_load_min_bytes = int(s.normalized().litematic_async_load_min_bytes)
+
     def active_file_path(self) -> Path | None:
         """当前激活的投影文件路径；无文件时为 ``None``（供统计等模块读取）。"""
         return self._current_data.file_path
@@ -167,7 +273,10 @@ class PropertiesPage(QWidget):
         """材料列表子区域下拉用 ``(显示名, litemapy 区域键)``。
 
         与内存中当前模型、路径一致时返回，避免打开材料列表时再对大文件 ``Schematic.load``。
-        若路径不一致或尚无模型则返回 ``None``（由对话框回退异步读取）。"""
+        若路径不一致或尚无模型则返回 ``None``（由对话框回退异步读取）。
+        打开文件过程中返回 ``None``，避免材料列表沿用上一文件的区域列表。"""
+        if self._snbt_load_busy:
+            return None
         p = self.active_file_path()
         if p is None or self._current_data.file_path is None:
             return None
@@ -524,6 +633,7 @@ class PropertiesPage(QWidget):
 
     def _on_clear_preview(self) -> None:
         """清空内存预览与画布，并标记脏（将写入空的 PreviewImageData）。"""
+        self._save_preview_from_model_list = False
         self._preview_image = QImage()
         self._preview_canvas.set_preview(None)
         self._preview_count_hint.setText("PreviewImageData: 0 项")
@@ -563,6 +673,7 @@ class PropertiesPage(QWidget):
         self._preview_canvas.set_preview(pix)
         # 固定 140×140 像素 → ARGB 列表长度恒为 19600
         self._preview_count_hint.setText(f"PreviewImageData: {140 * 140} 项")
+        self._save_preview_from_model_list = False
         self._mark_dirty()
 
     def apply_render_as_preview(self, image: QImage) -> None:
@@ -584,6 +695,7 @@ class PropertiesPage(QWidget):
         )
         self._preview_canvas.set_preview(QPixmap.fromImage(self._preview_image))
         self._preview_count_hint.setText(f"PreviewImageData: {140 * 140} 项")
+        self._save_preview_from_model_list = False
         self._mark_dirty()
 
     def _on_restore_defaults(self) -> None:
@@ -642,16 +754,48 @@ class PropertiesPage(QWidget):
             return
         self._load_from_file(written)
 
-    def _load_from_file(self, file_path: str | Path) -> None:
-        """解析 SNBT 填充 ``SnbtProperties``，并在 ``_loading`` 保护下刷新全部控件。
-
-        成功后同步更新 ``_baseline_snapshot``，供「恢复默认值」使用。
-        """
-        try:
-            data = load_snbt_properties(file_path)
-        except Exception as exc:
-            QMessageBox.critical(self, "打开失败", f"读取 SNBT 失败：\n{exc}")
+    def _set_snbt_load_busy(self, busy: bool, *, wait_cursor: bool = True) -> None:
+        """锁定部分按钮；``wait_cursor`` 为 True 时叠加等待光标（同步加载小文件用，异步大文件仅用对话框）。"""
+        self._snbt_load_busy = busy
+        if not busy:
+            self._async_load_target_path = None
+        for w in (
+            self._btn_choose_external,
+            self._btn_choose_library,
+            self._btn_save,
+            self._btn_save_as,
+            self._btn_restore,
+        ):
+            w.setEnabled(not busy)
+        app = QApplication.instance()
+        if app is None:
             return
+        if busy:
+            if wait_cursor:
+                app.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                self._snbt_load_wait_cursor_pushed = True
+        else:
+            if self._snbt_load_wait_cursor_pushed:
+                app.restoreOverrideCursor()
+                self._snbt_load_wait_cursor_pushed = False
+        self._sync_title_hint()
+
+    def _on_snbt_load_thread_finished(self) -> None:
+        th = self.sender()
+        if th is self._load_thread:
+            self._load_thread = None
+
+    def _close_snbt_progress_dialog(self) -> None:
+        dlg = self._snbt_progress_dialog
+        if dlg is None:
+            return
+        self._snbt_progress_dialog = None
+        dlg.blockSignals(True)
+        dlg.hide()
+        dlg.deleteLater()
+
+    def _commit_loaded_snbt_model(self, data: SnbtProperties) -> None:
+        """将成功解析的模型写入内存并刷新 UI（同步/异步路径共用）。"""
         self._current_data = data
         self._baseline_snapshot = copy_snbt_properties(data)
         self._dirty = False
@@ -659,7 +803,108 @@ class PropertiesPage(QWidget):
         self._apply_model_to_ui(data)
         self._loading = False
         if data.file_path is not None:
-            self.active_file_changed.emit(str(data.file_path.resolve()))
+            _p = str(data.file_path.resolve())
+
+            def _emit_active() -> None:
+                self.active_file_changed.emit(_p)
+
+            # 下一事件循环再通知各页，避免与预览解码、重绘挤在同一主线程切片里
+            QTimer.singleShot(0, _emit_active)
+
+    def _on_snbt_loaded_ok(self, data: SnbtProperties, seq: int) -> None:
+        if seq != self._snbt_load_seq:
+            return
+        self._set_snbt_load_busy(False)
+        self._close_snbt_progress_dialog()
+        self._commit_loaded_snbt_model(data)
+
+    def _on_snbt_loaded_fail(self, message: str, seq: int) -> None:
+        if seq != self._snbt_load_seq:
+            return
+        self._set_snbt_load_busy(False)
+        self._close_snbt_progress_dialog()
+        QMessageBox.critical(self, "打开失败", f"读取 SNBT 失败：\n{message}")
+
+    def _on_async_snbt_load_canceled(self) -> None:
+        """用户点击「中断」：作废当前序号并终止子进程（勿 ``QThread.terminate``）。"""
+        self._snbt_load_seq += 1
+        w = self._load_thread
+        if w is not None:
+            w.abort_child_process()
+            if w.isRunning():
+                w.wait(8000)
+        self._load_thread = None
+        self._set_snbt_load_busy(False)
+        self._close_snbt_progress_dialog()
+
+    def _load_snbt_sync(self, path: Path, seq: int) -> None:
+        """主线程直接 ``load_snbt_properties``（小文件或阈值较高时）。"""
+        try:
+            data = load_snbt_properties(path)
+        except Exception as exc:
+            if seq == self._snbt_load_seq:
+                QMessageBox.critical(self, "打开失败", f"读取 SNBT 失败：\n{exc}")
+            return
+        if seq != self._snbt_load_seq:
+            return
+        self._commit_loaded_snbt_model(data)
+
+    def _load_from_file(self, file_path: str | Path) -> None:
+        """按设置决定同步或后台加载；大于阈值时在后台 ``amulet_nbt.load`` 并显示可中断进度。
+
+        成功后同步更新 ``_baseline_snapshot``，供「恢复默认值」使用。
+        """
+        self._snbt_load_seq += 1
+        seq = self._snbt_load_seq
+        if self._load_thread is not None:
+            old = self._load_thread
+            self._load_thread = None
+            old.abort_child_process()
+            old.finished.connect(old.deleteLater)
+        self._close_snbt_progress_dialog()
+
+        path = Path(file_path)
+        try:
+            size = path.stat().st_size
+        except OSError as exc:
+            QMessageBox.critical(self, "打开失败", f"无法访问文件：\n{exc}")
+            return
+
+        threshold = self._litematic_async_load_min_bytes
+        if size <= threshold:
+            self._load_snbt_sync(path, seq)
+            return
+
+        # 异步路径：顶部路径行同步显示「加载中…」，避免子进程很快完成时模态框一闪而过无反馈
+        self._async_load_target_path = path.resolve()
+        self._set_snbt_load_busy(True, wait_cursor=False)
+        dlg = _LitematicLoadWaitDialog(self, path.name, size / 1024.0)
+        dlg.rejected.connect(self._on_async_snbt_load_canceled)
+        self._snbt_progress_dialog = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+
+        def _kick_off() -> None:
+            if seq != self._snbt_load_seq or self._snbt_progress_dialog is None:
+                return
+            worker = _SnbtLoadWorker(path)
+            self._load_thread = worker
+            worker.finished_ok.connect(
+                lambda d, s=seq: self._on_snbt_loaded_ok(d, s),
+                Qt.ConnectionType.QueuedConnection,
+            )
+            worker.failed.connect(
+                lambda err, s=seq: self._on_snbt_loaded_fail(err, s),
+                Qt.ConnectionType.QueuedConnection,
+            )
+            worker.finished.connect(self._on_snbt_load_thread_finished)
+            worker.start()
+
+        QTimer.singleShot(0, _kick_off)
 
     def _apply_model_to_ui(self, data: SnbtProperties) -> None:
         """单向：数据模型 → 控件文本与预览；不修改 ``_dirty``（由调用方控制）。"""
@@ -741,26 +986,48 @@ class PropertiesPage(QWidget):
         """将文件中的 PreviewImageData（每元素 32 位 ARGB）还原为 ``QImage`` 并显示。
 
         仅当列表长度为完全平方数时才认为合法；否则清空预览且不标脏（加载阶段）。
+        像素数大于 ``_MAX_PREVIEW_PIXELS_SHOW`` 时不加载界面预览；保存仍用 ``_current_data.preview_image_data``。
         """
         if not data:
+            self._save_preview_from_model_list = True
             self._on_clear_preview_no_dirty()
             return
         side = int(len(data) ** 0.5)
         if side * side != len(data):
+            self._save_preview_from_model_list = True
             self._on_clear_preview_no_dirty()
             return
-        image = QImage(side, side, QImage.Format.Format_ARGB32)
-        for y in range(side):
-            base = y * side
-            for x in range(side):
-                # 与 Qt 像素一致，掩掉高位防止有符号扩展问题
-                image.setPixel(x, y, int(data[base + x]) & 0xFFFFFFFF)
-        self._preview_image = image
+        if len(data) > _MAX_PREVIEW_PIXELS_SHOW:
+            self._save_preview_from_model_list = True
+            self._on_clear_preview_no_dirty()
+            self._preview_count_hint.setText(
+                f"PreviewImageData: {len(data)} 项（>{_MAX_PREVIEW_PIXELS_SHOW} 像素，已跳过界面加载）"
+            )
+            return
+        try:
+            raw = array.array("I", (int(data[i]) & 0xFFFFFFFF for i in range(side * side))).tobytes()
+            image = QImage(raw, side, side, side * 4, QImage.Format.Format_ARGB32)
+            if image.isNull():
+                raise RuntimeError("QImage from buffer is null")
+            self._preview_image = image.copy()
+        except Exception:
+            image = QImage(side, side, QImage.Format.Format_ARGB32)
+            for y in range(side):
+                base = y * side
+                for x in range(side):
+                    image.setPixel(x, y, int(data[base + x]) & 0xFFFFFFFF)
+            self._preview_image = image
         self._preview_canvas.set_preview(QPixmap.fromImage(self._preview_image))
         self._preview_count_hint.setText(f"PreviewImageData: {len(data)} 项")
+        self._save_preview_from_model_list = True
 
     def _preview_to_argb_list(self) -> list[int]:
-        """将当前 ``_preview_image`` 按行主序展开为与 SNBT 互操作的 int 列表（ARGB32）。"""
+        """将当前预览写回 SNBT 用的 ARGB32 列表。
+
+        若自文件载入后仅做了界面缩略解码，则仍写回 ``_current_data.preview_image_data`` 原列表。
+        """
+        if self._save_preview_from_model_list:
+            return list(self._current_data.preview_image_data)
         if self._preview_image.isNull():
             return []
         image = self._preview_image.convertToFormat(QImage.Format.Format_ARGB32)
@@ -798,7 +1065,10 @@ class PropertiesPage(QWidget):
 
     def _sync_title_hint(self) -> None:
         """更新顶部路径文案、ToolTip 与省略显示；未保存时在文案末尾追加 `` *``。"""
-        base = str(self._current_data.file_path) if self._current_data.file_path else "当前未激活文件"
+        if self._snbt_load_busy and self._async_load_target_path is not None:
+            base = f"加载中… {self._async_load_target_path}"
+        else:
+            base = str(self._current_data.file_path) if self._current_data.file_path else "当前未激活文件"
         self._full_file_hint_text = f"{base}{' *' if self._dirty else ''}"
         self._active_file_hint.setToolTip(self._full_file_hint_text)
         self._update_file_hint_elide()

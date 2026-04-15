@@ -68,6 +68,9 @@ DEFAULT_BLOCK_ICON_PREWARM_BATCH_INTERVAL_MS = 8
 DEFAULT_BLOCK_ICON_PREWARM_BATCH_COUNT = 10
 DEFAULT_BLOCK_ICON_PREWARM_DECODE_THREAD = BLOCK_ICON_PREWARM_DECODE_MAIN
 
+# 投影文件大于该字节数时在后台线程执行 ``amulet_nbt.load``，并显示可中断的进度对话框（选项「性能与预加载」）
+DEFAULT_LITEMATIC_ASYNC_LOAD_MIN_BYTES = 128 * 1024
+
 
 @dataclass
 class AppSettings:
@@ -105,6 +108,8 @@ class AppSettings:
     block_icon_prewarm_batch_interval_ms: int = DEFAULT_BLOCK_ICON_PREWARM_BATCH_INTERVAL_MS
     block_icon_prewarm_batch_count: int = DEFAULT_BLOCK_ICON_PREWARM_BATCH_COUNT
     block_icon_prewarm_decode_thread: str = DEFAULT_BLOCK_ICON_PREWARM_DECODE_THREAD
+    # 文件大小 **大于** 该值时后台加载；否则主线程同步加载（小文件避免线程调度开销）
+    litematic_async_load_min_bytes: int = DEFAULT_LITEMATIC_ASYNC_LOAD_MIN_BYTES
 
     def normalized(self) -> AppSettings:
         t = self.theme_id if self.theme_id in VALID_THEMES else DEFAULT_THEME
@@ -171,6 +176,9 @@ class AppSettings:
                 1, min(500, int(self.block_icon_prewarm_batch_count))
             ),
             block_icon_prewarm_decode_thread=bdt,
+            litematic_async_load_min_bytes=max(
+                0, min(512 * 1024 * 1024, int(self.litematic_async_load_min_bytes))
+            ),
         )
 
 
@@ -271,6 +279,12 @@ def load_settings() -> AppSettings:
             raw.get(
                 "block_icon_prewarm_decode_thread",
                 DEFAULT_BLOCK_ICON_PREWARM_DECODE_THREAD,
+            )
+        ),
+        litematic_async_load_min_bytes=int(
+            raw.get(
+                "litematic_async_load_min_bytes",
+                DEFAULT_LITEMATIC_ASYNC_LOAD_MIN_BYTES,
             )
         ),
     ).normalized()

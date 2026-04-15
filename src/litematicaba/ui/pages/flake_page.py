@@ -95,14 +95,18 @@ class FlakePage(QWidget):
             self._region_combo.blockSignals(False)
             return
         try:
-            from litemapy import Schematic
+            ents = self._props.material_list_region_entries_for_active_file()
+            if ents is not None:
+                for display_name, source_key in ents:
+                    self._region_combo.addItem(display_name, source_key)
+            else:
+                from litemapy import Schematic
 
-            sch = Schematic.load(str(path))
-            keys = list(sch.regions.keys())
+                sch = Schematic.load(str(path))
+                for k in sch.regions.keys():
+                    self._region_combo.addItem(k, k)
         except Exception:
-            keys = []
-        for k in keys:
-            self._region_combo.addItem(k, k)
+            pass
         self._region_combo.blockSignals(False)
 
     def _selected_region_name(self) -> str | None:

@@ -717,16 +717,20 @@ class RenderPage(QWidget):
         if path is None:
             self._region_combo.blockSignals(False)
             return
-        try:
-            from litemapy import Schematic
-
-            sch = Schematic.load(str(path))
-            keys = list(sch.regions.keys())
-        except Exception:
-            keys = []
         self._region_combo.addItem("全部区域", None)
-        for k in keys:
-            self._region_combo.addItem(k, k)
+        try:
+            ents = self._props.material_list_region_entries_for_active_file()
+            if ents is not None:
+                for display_name, source_key in ents:
+                    self._region_combo.addItem(display_name, source_key)
+            else:
+                from litemapy import Schematic
+
+                sch = Schematic.load(str(path))
+                for k in sch.regions.keys():
+                    self._region_combo.addItem(k, k)
+        except Exception:
+            pass
         self._region_combo.blockSignals(False)
 
     def _payload_region_name(self) -> str | None:

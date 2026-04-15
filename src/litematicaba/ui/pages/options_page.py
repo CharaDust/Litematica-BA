@@ -34,6 +34,7 @@ from litematicaba.core.settings import (
     DEFAULT_BLOCK_ICON_PRELOAD_MODE,
     DEFAULT_BLOCK_ICON_PREWARM_BATCH_COUNT,
     DEFAULT_BLOCK_ICON_PREWARM_BATCH_INTERVAL_MS,
+    DEFAULT_LITEMATIC_ASYNC_LOAD_MIN_BYTES,
     MATERIAL_LIST_PREWARM_ON_LITEMATIC,
     MATERIAL_LIST_PREWARM_ON_MATERIAL_LIST,
     NBT_EXPORT_FULL_MARGIN_DEFAULT,
@@ -128,6 +129,15 @@ class OptionsPage(QWidget):
             "首次点击材料列表时", MATERIAL_LIST_PREWARM_ON_MATERIAL_LIST
         )
         form_perf.addRow("材料列表计算时机：", self._material_list_prewarm)
+        self._litematic_async_load_min_kb = QSpinBox()
+        self._litematic_async_load_min_kb.setRange(0, 512 * 1024)
+        self._litematic_async_load_min_kb.setSuffix(" KB")
+        self._litematic_async_load_min_kb.setToolTip(
+            "磁盘上投影文件大小 **大于** 该值时，在后台线程执行 NBT 加载并显示可中断的进度；"
+            "否则在主线程直接加载（通常更快）。"
+            f" 默认 {DEFAULT_LITEMATIC_ASYNC_LOAD_MIN_BYTES // 1024} KB。"
+        )
+        form_perf.addRow("投影后台加载阈值：", self._litematic_async_load_min_kb)
         self._block_icon_prewarm_interval_ms = QSpinBox()
         self._block_icon_prewarm_interval_ms.setRange(0, 2000)
         self._block_icon_prewarm_interval_ms.setSingleStep(1)
@@ -320,6 +330,7 @@ class OptionsPage(QWidget):
         self._nbt_export_ortho_hmin.valueChanged.connect(self._persist)
         self._block_icon_preload.currentIndexChanged.connect(self._on_block_icon_preload_changed)
         self._material_list_prewarm.currentIndexChanged.connect(self._persist)
+        self._litematic_async_load_min_kb.valueChanged.connect(self._persist)
         self._block_icon_prewarm_interval_ms.valueChanged.connect(self._persist)
         self._block_icon_prewarm_batch_count.valueChanged.connect(self._persist)
         self._block_icon_prewarm_decode_thread.currentIndexChanged.connect(self._persist)
@@ -355,6 +366,7 @@ class OptionsPage(QWidget):
         self._material_list_prewarm.setCurrentIndex(midx if midx >= 0 else 0)
         self._block_icon_prewarm_interval_ms.setValue(s.block_icon_prewarm_batch_interval_ms)
         self._block_icon_prewarm_batch_count.setValue(s.block_icon_prewarm_batch_count)
+        self._litematic_async_load_min_kb.setValue(max(0, s.litematic_async_load_min_bytes // 1024))
         tidx = self._block_icon_prewarm_decode_thread.findData(s.block_icon_prewarm_decode_thread)
         self._block_icon_prewarm_decode_thread.setCurrentIndex(tidx if tidx >= 0 else 0)
         self._committed_block_icon_mode = self._block_icon_preload.currentData()
@@ -388,6 +400,7 @@ class OptionsPage(QWidget):
             block_icon_prewarm_batch_interval_ms=self._block_icon_prewarm_interval_ms.value(),
             block_icon_prewarm_batch_count=self._block_icon_prewarm_batch_count.value(),
             block_icon_prewarm_decode_thread=self._block_icon_prewarm_decode_thread.currentData(),
+            litematic_async_load_min_bytes=self._litematic_async_load_min_kb.value() * 1024,
         ).normalized()
 
     def _on_deepslate_update_clicked(self) -> None:

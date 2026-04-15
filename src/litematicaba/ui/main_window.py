@@ -77,7 +77,7 @@ class MainWindow(QWidget):
         self._stack = QStackedWidget()
         self._stack.addWidget(HomePage())
         self._stack.addWidget(LibraryPage())
-        self._properties_page = PropertiesPage()
+        self._properties_page = PropertiesPage(app_settings=self._settings)
         self._stack.addWidget(self._properties_page)
         self._material_list_scan_prewarmer = MaterialListScanPrewarmer(self)
         self._icon_prewarm_session_litematic = False
@@ -345,6 +345,7 @@ class MainWindow(QWidget):
         self._perf_test.set_enabled(s.perf_test_overlay)
         self._ui_test_page.apply_settings(s)
         self._properties_page.apply_regions_table_theme()
+        self._properties_page.apply_app_settings(s)
         self._render_page.apply_deepslate_settings(s)
         self._apply_sidebar_geometry()
         if s.block_icon_preload_mode != old_icon:
