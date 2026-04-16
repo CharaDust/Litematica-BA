@@ -39,6 +39,7 @@ from litematicaba.ui.widgets.mcmeta_standard_table import (
     apply_game_resource_language_table_chrome,
     apply_mcmeta_standard_table_row_heights,
     attach_mcmeta_row_hover_to_button,
+    clear_mcmeta_table_current_cell,
 )
 
 _COL_LANG = 0
@@ -142,6 +143,7 @@ class GameResourceLanguageDialog(QDialog):
         app = QApplication.instance()
         tid = current_theme_id(app if isinstance(app, QApplication) else None)
         self._hover_ctrl = apply_game_resource_language_table_chrome(self._table, tid)
+        self._table.setObjectName("OptionsLanguageFileTable")
 
         root.addWidget(QLabel("已装载的语言"))
         root.addWidget(self._table, 1)
@@ -232,6 +234,7 @@ class GameResourceLanguageDialog(QDialog):
         tid = current_theme_id(app if isinstance(app, QApplication) else None)
         apply_mcmeta_standard_table_row_heights(self._table, tid)
         self._hover_ctrl.set_hover_row(None)
+        clear_mcmeta_table_current_cell(self._table)
 
     def _on_source_changed(self) -> None:
         src = self._source.currentData()

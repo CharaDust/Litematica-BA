@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from litematicaba.core.legacy_statistics import LegacyStatisticsResult, compute_legacy_statistics
 from litematicaba.ui.material_list_dialog import MaterialListDialog
+from litematicaba.ui.material_list_scan_prewarmer import MaterialListScanPrewarmer
 from litematicaba.ui.pages.properties_page import PropertiesPage
 
 
@@ -43,11 +45,20 @@ class _StatisticsComputeThread(QThread):
 
 
 class StatisticsPage(QWidget):
-    """依赖 ``PropertiesPage`` 的当前文件路径；激活文件后即在后台统计，无需切到本页。"""
+    """依赖 ``PropertiesPage`` 的当前文件路径；是否在材料预扫后再统计由设置决定。"""
 
-    def __init__(self, properties_page: PropertiesPage, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        properties_page: PropertiesPage,
+        parent: QWidget | None = None,
+        *,
+        material_scan_prewarmer: MaterialListScanPrewarmer | None = None,
+        defer_stats_until_material_prewarm: Callable[[], bool] | None = None,
+    ) -> None:
         super().__init__(parent)
         self._props = properties_page
+        self._material_scan_prewarmer = material_scan_prewarmer
+        self._defer_stats_until_material_prewarm = defer_stats_until_material_prewarm
         self._thread: _StatisticsComputeThread | None = None
         """若当前有线程在跑时再次请求统计，则记最近一次待执行请求（路径 + force）。"""
         self._queued_job: tuple[Path, bool] | None = None
@@ -106,6 +117,15 @@ class StatisticsPage(QWidget):
         root.addStretch()
 
         self._props.active_file_changed.connect(self._on_active_file_changed)
+        if self._material_scan_prewarmer is not None:
+            self._material_scan_prewarmer.finished_for_path.connect(self._on_material_prewarm_finished)
+
+    def _should_wait_material_prewarm_for_stats(self) -> bool:
+        if self._material_scan_prewarmer is None:
+            return False
+        if self._defer_stats_until_material_prewarm is None:
+            return True
+        return self._defer_stats_until_material_prewarm()
 
     @staticmethod
     def _readonly_line_edit(*, align_right: bool) -> QLineEdit:
@@ -124,7 +144,11 @@ class StatisticsPage(QWidget):
         if self._props.active_file_path() is None:
             QMessageBox.information(self, "材料列表", "请先在「属性」页打开一个投影文件。")
             return
-        MaterialListDialog.open_for_properties(self._props, self)
+        MaterialListDialog.open_for_properties(
+            self._props,
+            self,
+            material_scan_prewarmer=self._material_scan_prewarmer,
+        )
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -136,11 +160,26 @@ class StatisticsPage(QWidget):
         if self._thread is not None and self._thread.isRunning():
             self._set_loading_metrics()
             return
+        if self._should_wait_material_prewarm_for_stats() and self._material_scan_prewarmer is not None:
+            if self._material_scan_prewarmer.is_busy_for(p.resolve()):
+                self._set_loading_metrics()
+                return
         self._start_compute(force=False)
 
     def _on_active_file_changed(self, _path: str) -> None:
         self._invalidate_cache()
         self._sync_path_label()
+        if self._should_wait_material_prewarm_for_stats():
+            self._set_loading_metrics()
+            return
+        self._start_compute(force=False)
+
+    def _on_material_prewarm_finished(self, p: Path) -> None:
+        if not self._should_wait_material_prewarm_for_stats():
+            return
+        cur = self._props.active_file_path()
+        if cur is None or cur.resolve() != p.resolve():
+            return
         self._start_compute(force=False)
 
     def _on_entities_toggled(self, _checked: bool) -> None:

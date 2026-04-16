@@ -75,12 +75,18 @@ if "!MODE!"=="full" (
     --hidden-import PySide6.QtSvg ^
     --add-data "%ROOT%\src\litematicaba\ui\resources;litematicaba\ui\resources" ^
     --add-data "%ROOT%\src\litematicaba\resources\web;litematicaba\resources\web" ^
+    --add-data "%ROOT%\pack-in;pack-in" ^
+    --add-data "%ROOT%\lang;lang" ^
     --add-data "%ROOT%\logo;logo" ^
+    --splash "%ROOT%\logo\logo_full.png" ^
+    --noupx ^
     "%ROOT%\src\litematicaba\__main__.py"
 ) else (
   "%ROOT%\.venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed ^
     --name "!EXENAME!" --paths "%ROOT%\src" ^
     --hidden-import PySide6.QtSvg ^
+    --splash "%ROOT%\logo\logo_full.png" ^
+    --noupx ^
     "%ROOT%\src\litematicaba\__main__.py"
 )
 

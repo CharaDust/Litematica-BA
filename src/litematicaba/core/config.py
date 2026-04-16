@@ -7,7 +7,10 @@ _user_accepted_unwritable_data_dir: bool = False
 
 
 def project_root() -> Path:
-    # src/litematicaba/core/config.py -> repository root（源码运行）
+    # 源码：src/litematicaba/core/config.py 上溯四级 -> 仓库根。
+    # 打包 onefile：模块在 _MEIxxxx 下，parents[3] 会变成 Temp 等错误路径；资源与 add-data 均在 _MEIPASS。
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(getattr(sys, "_MEIPASS"))
     return Path(__file__).resolve().parents[3]
 
 

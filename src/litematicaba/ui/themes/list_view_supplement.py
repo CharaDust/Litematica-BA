@@ -1,20 +1,31 @@
-"""为版本管理等对话框中的 QTableWidget 追加与各主题一致的 QSS（主主题文件未覆盖 QAbstractItemView）。"""
+"""为列表型 QTableWidget 追加与各主题一致的 QSS（主主题文件未覆盖 QAbstractItemView）。"""
 
 from __future__ import annotations
 
 from PySide6.QtGui import QColor
 
 from litematicaba.core.settings import DEFAULT_THEME, VALID_THEMES
+from litematicaba.ui.table.metro10_list_profile import METRO10_LIST_TABLE_TOKENS
+from litematicaba.ui.table.minecraft_list_profile import (
+    MINECRAFT_LIST_TABLE_TOKENS,
+    TABLE_LIST_ROW_HEIGHT_MINECRAFT_PX,
+    minecraft_list_view_supplement_qss,
+)
 
 # 仅作用于带 objectName 的宿主，避免污染其它表格控件。
 # 注意：QTableWidget 行高基本不受 QSS 的 ::item min-height 控制，须由代码 setDefaultSectionSize/setRowHeight 应用下列数值。
-_SEL_DIALOG = "QDialog#McmetaVersionPickerDialog QTableWidget#McmetaVersionTable"
-_SEL_SECTION = "QWidget#McmetaStandardTableSection QTableWidget#McmetaVersionTable"
+_SEL_DIALOG = "QDialog#McmetaVersionPickerDialog QTableWidget#OptionsMetaDownloadTable"
+_SEL_SECTION = "QWidget#McmetaStandardTableSection QTableWidget#UITestActionTable"
 # UI 测试页「内容物」列表：Minecraft 下与操作表共用同一套表格皮肤
-_SEL_UI_TEST_CONTENT_LIST = "QWidget#UiTestContentListSection QTableWidget#UiTestContentListTable"
-_SEL_LANG = "QDialog#GameResourceLanguageDialog QTableWidget#GameResourceLanguageTable"
-_SEL = f"{_SEL_DIALOG}, {_SEL_SECTION}, {_SEL_LANG}"
-# Minecraft：操作表 + UI 测试「内容物」表共用底纹；选中色分别写（操作表避免 MC 经典绿 #5a922c）
+_SEL_UI_TEST_CONTENT_LIST = "QWidget#UiTestContentListSection QTableWidget#UITestContentListTable"
+_SEL_LANG = "QDialog#GameResourceLanguageDialog QTableWidget#OptionsLanguageFileTable"
+_SEL_BLOCK_ICON = "QDialog#GameResourceBlockIconDialog QTableWidget#OptionsBlockIconResourceTable"
+_SEL_MATERIAL = "QDialog#MaterialListDialog QTableWidget#MaterialListTable"
+_SEL_PROPERTIES_REGION = "QTableWidget#PropertiesRegionTable"
+# mcmeta 操作表语义（选中 #000000）；不含材料表（材料表走列表型 delegate / Metro 覆写）
+_SEL_OP_DIALOGS = f"{_SEL_DIALOG}, {_SEL_SECTION}, {_SEL_LANG}, {_SEL_BLOCK_ICON}"
+_SEL = f"{_SEL_OP_DIALOGS}, {_SEL_MATERIAL}, {_SEL_PROPERTIES_REGION}"
+# Minecraft：操作表 + UI 测试「内容物」表共用底纹；内容列表选中色与 delegate 一致（#3c3c3c）
 _SEL_MC_ALL_TABLES = f"{_SEL}, {_SEL_UI_TEST_CONTENT_LIST}"
 
 # QTDefault / Metro8 / Metro10 / Minecraft：不强制「行高 > 按钮高」；其中 Metro10、Minecraft 仍用下列固定行高。
@@ -23,8 +34,8 @@ MCMETA_TABLE_ROW_HEIGHT_LOOSE_THEMES = frozenset({"QTDefault", "Metro8", "Metro1
 MCMETA_TABLE_ROW_HEIGHT_FALLBACK_TIGHT_PX = 52
 
 MCMETA_TABLE_ROW_HEIGHT_PX_BY_THEME: dict[str, int] = {
-    "Metro10": 60,
-    "Minecraft": 44,
+    "Metro10": METRO10_LIST_TABLE_TOKENS.row_height,
+    "Minecraft": TABLE_LIST_ROW_HEIGHT_MINECRAFT_PX,
     "Glass7": 52,
     "Fluent11": 52,
     "LightMac": 50,
@@ -45,11 +56,11 @@ MCMETA_TABLE_MIN_HEIGHT_PX_BY_THEME: dict[str, int] = {
     "QTDefault": 300,
     "Glass7": 320,
     "Metro8": 288,
-    "Metro10": 304,
+    "Metro10": METRO10_LIST_TABLE_TOKENS.min_height,
     "Fluent11": 336,
     "LightMac": 312,
     "Bootstrap5": 324,
-    "Minecraft": 352,
+    "Minecraft": MINECRAFT_LIST_TABLE_TOKENS.min_height_px,
 }
 
 
@@ -63,16 +74,16 @@ MCMETA_TABLE_ROW_HOVER_BG_HEX_BY_THEME: dict[str, str] = {
     "QTDefault": "#e8e8e8",
     "Glass7": "#c8dcff",
     "Metro8": "#d0d0d0",
-    "Metro10": "#e6e6e6",
+    "Metro10": METRO10_LIST_TABLE_TOKENS.hover_bg_hex,
     "Fluent11": "#f0f6fc",
     "LightMac": "#e5e5e5",
     "Bootstrap5": "#e9ecef",
-    "Minecraft": "#2b2b2b",
+    "Minecraft": MINECRAFT_LIST_TABLE_TOKENS.hover_bg_hex,
 }
 
 # 悬停时首列自绘文字色；未列出则使用调色板默认文字色。
 MCMETA_TABLE_ROW_HOVER_FG_HEX_BY_THEME: dict[str, str] = {
-    "Minecraft": "#ffffff",
+    "Minecraft": MINECRAFT_LIST_TABLE_TOKENS.text_fg_hex,
 }
 
 
@@ -130,13 +141,18 @@ LIST_VIEW_QSS_BY_THEME: dict[str, str] = {
       background-color: #0078d7;
       color: #ffffff;
     }}
+    QDialog#MaterialListDialog QTableWidget#MaterialListTable::item:selected {{
+      background-color: {METRO10_LIST_TABLE_TOKENS.selected_bg_hex};
+      color: {METRO10_LIST_TABLE_TOKENS.text_fg_hex};
+    }}
     """,
     "Metro10": f"""
     {_SEL} {{
-      border: 1px solid #c8c8c8;
+      border: none;
       border-radius: 0;
       background-color: #ffffff;
-      padding: 2px;
+      alternate-background-color: #ffffff;
+      padding: 0px;
       outline: none;
     }}
     {_SEL}::item {{
@@ -144,8 +160,16 @@ LIST_VIEW_QSS_BY_THEME: dict[str, str] = {
       border: none;
     }}
     {_SEL}::item:selected {{
-      background-color: #0078d4;
-      color: #ffffff;
+      background-color: #ffffff;
+      color: #1a1a1a;
+    }}
+    {_SEL} QTableCornerButton::section {{
+      background-color: #ffffff;
+      border: none;
+    }}
+    QDialog#MaterialListDialog QTableWidget#MaterialListTable::item:selected {{
+      background-color: {METRO10_LIST_TABLE_TOKENS.selected_bg_hex};
+      color: {METRO10_LIST_TABLE_TOKENS.text_fg_hex};
     }}
     """,
     "Bootstrap5": f"""
@@ -176,25 +200,12 @@ LIST_VIEW_QSS_BY_THEME: dict[str, str] = {
       color: #ffffff;
     }}
     """,
-    "Minecraft": f"""
-    {_SEL_MC_ALL_TABLES} {{
-      border: 2px solid #555555;
-      border-radius: 0;
-      background-color: #000000;
-      color: #ffffff;
-      alternate-background-color: #1a1a1a;
-      padding: 4px;
-      outline: none;
-    }}
-    {_SEL}::item:selected {{
-      background-color: #000000;
-      color: #ffffff;
-    }}
-    {_SEL_UI_TEST_CONTENT_LIST}::item:selected {{
-      background-color: #5a922c;
-      color: #ffffff;
-    }}
-    """,
+    "Minecraft": minecraft_list_view_supplement_qss(
+        sel_mc_all_tables=_SEL_MC_ALL_TABLES,
+        sel_op_tables=_SEL_OP_DIALOGS,
+        sel_ui_content_list=_SEL_UI_TEST_CONTENT_LIST,
+        sel_material_list=_SEL_MATERIAL,
+    ),
 }
 
 

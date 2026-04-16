@@ -22,6 +22,10 @@ from litematicaba.ui.content_display.list_table.view import (
     METRO_LIST_ROW_HOVER_COLOR,
     METRO_LIST_ROW_TEXT_COLOR,
 )
+from litematicaba.ui.table.minecraft_list_profile import (
+    MCMETA_VIEWPORT_FILL_BELOW_ITEMS_MINECRAFT_HEX,
+    apply_minecraft_list_table_header_chrome,
+)
 from litematicaba.ui.theme import normalize_theme_id
 from litematicaba.ui.themes.list_view_supplement import (
     mcmeta_table_row_hover_bg,
@@ -257,6 +261,25 @@ class McmetaStandardFirstColumnDelegate(McmetaStandardTextColumnsDelegate):
         super().__init__(parent_table, text_columns=(0,), metro_no_zebra=metro_no_zebra)
 
 
+def apply_mcmeta_table_viewport_fill_below_items(table: QTableWidget, theme_id: str) -> None:
+    """表体视口在末行之下的区域着色，避免透明 item 与 QSS 组合时透出异常底色。
+
+    **颜色依据**：与当前主题下列表/ supplement 表体的主底色一致——Metro 等浅色表为 ``#ffffff``（同 ``table_list_item_bg_primary``）；Minecraft 为 ``#000000``（同 supplement 中表 ``background-color``，常量 ``MCMETA_VIEWPORT_FILL_BELOW_ITEMS_MINECRAFT_HEX``）。
+    """
+    tid = normalize_theme_id(theme_id)
+    hx = MCMETA_VIEWPORT_FILL_BELOW_ITEMS_MINECRAFT_HEX if tid == "Minecraft" else "#ffffff"
+    vp = table.viewport()
+    vp.setAutoFillBackground(True)
+    pal = vp.palette()
+    pal.setColor(QPalette.ColorRole.Window, QColor(hx))
+    vp.setPalette(pal)
+
+
+def clear_mcmeta_table_current_cell(table: QTableWidget) -> None:
+    """操作表为 NoSelection，但首列 ItemIsSelectable 仍会产生 current cell；清除以免 QSS :selected 状铺满留白。"""
+    table.setCurrentItem(None)
+
+
 def apply_mcmeta_standard_table_row_heights(table: QTableWidget, theme_id: str) -> None:
     tid = normalize_theme_id(theme_id)
     h = mcmeta_version_table_list_row_height_px(tid)
@@ -302,6 +325,9 @@ def configure_mcmeta_standard_action_table(
     table.viewport().setMouseTracking(True)
     table.setMinimumHeight(mcmeta_version_table_min_height_px(tid))
 
+    apply_mcmeta_table_viewport_fill_below_items(table, tid)
+    apply_minecraft_list_table_header_chrome(table, tid)
+
     ctrl = McmetaStandardTableRowHoverController(table)
     ctrl.install_on_viewport()
     return ctrl
@@ -333,6 +359,43 @@ def apply_game_resource_language_table_chrome(
     table.setMouseTracking(True)
     table.viewport().setMouseTracking(True)
     table.setMinimumHeight(mcmeta_version_table_min_height_px(tid))
+    apply_mcmeta_table_viewport_fill_below_items(table, tid)
+    apply_minecraft_list_table_header_chrome(table, tid)
+
+    ctrl = McmetaStandardTableRowHoverController(table, highlight_columns=(3,))
+    ctrl.install_on_viewport()
+    return ctrl
+
+
+def apply_block_icon_resource_table_chrome(
+    table: QTableWidget,
+    theme_id: str,
+) -> McmetaStandardTableRowHoverController:
+    """方块图标资源管理：前三列为文本，第四列为操作区；语义与语言管理表一致。"""
+    tid = normalize_theme_id(theme_id)
+    metro10 = tid == "Metro10"
+    table.setObjectName("GameResourceBlockIconTable")
+    table.setShowGrid(False)
+    table.verticalHeader().setVisible(False)
+    table.setEditTriggers(table.EditTrigger.NoEditTriggers)
+    table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+    table.setAutoScroll(False)
+    table._mcmeta_hover_row = None  # type: ignore[attr-defined]
+    table._mcmeta_hover_bg = mcmeta_table_row_hover_bg(tid)  # type: ignore[attr-defined]
+    table._mcmeta_hover_fg = mcmeta_table_row_hover_fg_optional(tid)  # type: ignore[attr-defined]
+    table.setAlternatingRowColors(not metro10)
+    table.setItemDelegate(
+        McmetaStandardTextColumnsDelegate(
+            table, text_columns=(0, 1, 2), metro_no_zebra=metro10
+        )
+    )
+    table.setMouseTracking(True)
+    table.viewport().setMouseTracking(True)
+    table.setMinimumHeight(mcmeta_version_table_min_height_px(tid))
+    apply_mcmeta_table_viewport_fill_below_items(table, tid)
+    apply_minecraft_list_table_header_chrome(table, tid)
+
     ctrl = McmetaStandardTableRowHoverController(table, highlight_columns=(3,))
     ctrl.install_on_viewport()
     return ctrl
@@ -352,5 +415,8 @@ def reapply_mcmeta_standard_action_table_theme(
     table.setItemDelegate(McmetaStandardFirstColumnDelegate(table, metro_no_zebra=metro10))
     table.setMinimumHeight(mcmeta_version_table_min_height_px(tid))
     apply_mcmeta_standard_table_row_heights(table, tid)
+    apply_mcmeta_table_viewport_fill_below_items(table, tid)
+    clear_mcmeta_table_current_cell(table)
+    apply_minecraft_list_table_header_chrome(table, tid)
     controller.set_hover_row(None)
     table.viewport().update()

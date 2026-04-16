@@ -36,6 +36,7 @@ from litematicaba.core.nbt_viewer_bundle import (
 )
 from litematicaba.core.settings import AppSettings
 from litematicaba.ui.material_list_dialog import MaterialListDialog
+from litematicaba.ui.material_list_scan_prewarmer import MaterialListScanPrewarmer
 from litematicaba.ui.pages.properties_page import PropertiesPage
 
 try:
@@ -260,10 +261,12 @@ class RenderPage(QWidget):
         properties_page: PropertiesPage,
         *,
         app_settings: AppSettings | None = None,
+        material_scan_prewarmer: MaterialListScanPrewarmer | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._props = properties_page
+        self._material_scan_prewarmer = material_scan_prewarmer
         self._deepslate_invert_y: bool = (
             bool(app_settings.deepslate_invert_y) if app_settings is not None else False
         )
@@ -714,16 +717,20 @@ class RenderPage(QWidget):
         if path is None:
             self._region_combo.blockSignals(False)
             return
-        try:
-            from litemapy import Schematic
-
-            sch = Schematic.load(str(path))
-            keys = list(sch.regions.keys())
-        except Exception:
-            keys = []
         self._region_combo.addItem("全部区域", None)
-        for k in keys:
-            self._region_combo.addItem(k, k)
+        try:
+            ents = self._props.material_list_region_entries_for_active_file()
+            if ents is not None:
+                for display_name, source_key in ents:
+                    self._region_combo.addItem(display_name, source_key)
+            else:
+                from litemapy import Schematic
+
+                sch = Schematic.load(str(path))
+                for k in sch.regions.keys():
+                    self._region_combo.addItem(k, k)
+        except Exception:
+            pass
         self._region_combo.blockSignals(False)
 
     def _payload_region_name(self) -> str | None:
@@ -958,4 +965,9 @@ class RenderPage(QWidget):
             QMessageBox.information(self, "材料列表", "请先在「属性」页打开一个投影文件。")
             return
         region = self._payload_region_name() if self._region_combo.count() > 0 else None
-        MaterialListDialog.open_for_properties(self._props, self, initial_region_name=region)
+        MaterialListDialog.open_for_properties(
+            self._props,
+            self,
+            initial_region_name=region,
+            material_scan_prewarmer=self._material_scan_prewarmer,
+        )

@@ -14,7 +14,11 @@ from litematicaba.core.litematic_block_scan import scan_litematic
 
 
 def _load_category_ordered() -> list[tuple[str, list[str]]]:
-    path = project_root() / "lang" / "category.json"
+    from litematicaba.core.game_resource_language import _legacy_dir, ensure_initial_language_seeded
+    ensure_initial_language_seeded()
+    path = _legacy_dir() / "category.json"
+    if not path.is_file():
+        return []
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         return []

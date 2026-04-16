@@ -13,6 +13,12 @@ from litematicaba.ui.main_window import MainWindow
 from litematicaba.ui.theme import apply_theme
 
 
+try:
+    import pyi_splash
+    pyi_splash.close()
+except ImportError:
+    pass
+
 def main() -> int:
     app = QApplication(sys.argv)
     if getattr(sys, "frozen", False) and not user_data_dir_is_writable():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from litematicaba.ui.table.minecraft_list_profile import minecraft_theme_table_item_min_height_px
 from litematicaba.ui.themes.base import ThemeDef, qss_url, resource_dir
 
 # 10×10 源图：四边各 4px 为九宫格边界（四角 4×4 固定，边条与中心区按 stretch 拉伸，等同 Windows 边框图逻辑）
@@ -17,10 +18,6 @@ _INPUT_OUTER_HEIGHT = 44
 _INPUT_BORDER_PX = 2
 _INPUT_PAD_V = 4
 _INPUT_PAD_H = 8
-# 列表行高约定（与输入框外高 44px 对齐）；QComboBox 下拉行高待定，不单独写 QSS。
-_LIST_ITEM_ROW_HEIGHT_PX = 44
-
-
 def build_qss() -> str:
     d = resource_dir("minecraft")
     bn = qss_url(d / "button_normal_min.png")
@@ -49,6 +46,7 @@ def build_qss() -> str:
     h_input_content = _INPUT_OUTER_HEIGHT - ib_v - ip_v
     ipv = _INPUT_PAD_V
     iph = _INPUT_PAD_H
+    list_item_row_h = minecraft_theme_table_item_min_height_px()
 
     def bi(url: str) -> str:
         return (
@@ -78,7 +76,7 @@ def build_qss() -> str:
     QListWidget::item,
     QTreeView::item,
     QTableView::item {{
-        min-height: {_LIST_ITEM_ROW_HEIGHT_PX}px;
+        min-height: {list_item_row_h}px;
     }}
 
     QPushButton, QToolButton {{

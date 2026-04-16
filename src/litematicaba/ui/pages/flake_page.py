@@ -19,15 +19,24 @@ from PySide6.QtWidgets import (
 )
 
 from litematicaba.ui.material_list_dialog import MaterialListDialog
+from litematicaba.ui.material_list_icon_prewarmer import request_icon_prewarm_from_material_or_flake_ui
+from litematicaba.ui.material_list_scan_prewarmer import MaterialListScanPrewarmer
 from litematicaba.ui.pages.properties_page import PropertiesPage
 
 
 class FlakePage(QWidget):
     """FR-F.1～F.4、F.6：视图区占位 + 子区域 + 层级滑条 + 材料列表。"""
 
-    def __init__(self, properties_page: PropertiesPage, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        properties_page: PropertiesPage,
+        parent: QWidget | None = None,
+        *,
+        material_scan_prewarmer: MaterialListScanPrewarmer | None = None,
+    ) -> None:
         super().__init__(parent)
         self._props = properties_page
+        self._material_scan_prewarmer = material_scan_prewarmer
 
         self._lbl_path = QLabel("请在「属性」页加载 .litematic。")
         self._lbl_path.setWordWrap(True)
@@ -86,14 +95,18 @@ class FlakePage(QWidget):
             self._region_combo.blockSignals(False)
             return
         try:
-            from litemapy import Schematic
+            ents = self._props.material_list_region_entries_for_active_file()
+            if ents is not None:
+                for display_name, source_key in ents:
+                    self._region_combo.addItem(display_name, source_key)
+            else:
+                from litemapy import Schematic
 
-            sch = Schematic.load(str(path))
-            keys = list(sch.regions.keys())
+                sch = Schematic.load(str(path))
+                for k in sch.regions.keys():
+                    self._region_combo.addItem(k, k)
         except Exception:
-            keys = []
-        for k in keys:
-            self._region_combo.addItem(k, k)
+            pass
         self._region_combo.blockSignals(False)
 
     def _selected_region_name(self) -> str | None:
@@ -111,6 +124,7 @@ class FlakePage(QWidget):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        request_icon_prewarm_from_material_or_flake_ui()
         self._sync_path_label()
         if self._region_combo.count() == 0:
             self._sync_region_combo()
@@ -124,4 +138,9 @@ class FlakePage(QWidget):
             QMessageBox.information(self, "材料列表", "请先在「属性」页打开一个投影文件。")
             return
         region = self._selected_region_name()
-        MaterialListDialog.open_for_properties(self._props, self, initial_region_name=region)
+        MaterialListDialog.open_for_properties(
+            self._props,
+            self,
+            initial_region_name=region,
+            material_scan_prewarmer=self._material_scan_prewarmer,
+        )

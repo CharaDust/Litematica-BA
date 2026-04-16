@@ -30,12 +30,15 @@ from litematicaba.core.content_tile_layout_db import ContentTileLayoutDB, TileLa
 from litematicaba.ui.content_display.list_table.view import ContentListTableWidget, ContentRow
 from litematicaba.ui.content_display.public.factory import generate_content_rows
 from litematicaba.ui.content_display.tiles.inventory_grid import InventoryGridWidget, GridPos
+from litematicaba.ui.table.metro10_list_profile import bind_ui_test_tables_to_metro10_list_profile
+from litematicaba.ui.table.minecraft_list_profile import bind_ui_test_tables_to_minecraft_list_profile
 from litematicaba.ui.theme import normalize_theme_id
 from litematicaba.ui.widgets.mcmeta_standard_table import (
     OBJ_MCMETA_STANDARD_APPLY_BTN,
     OBJ_MCMETA_STANDARD_OP_BTN,
     McmetaStandardTableCellHost,
     apply_mcmeta_standard_table_row_heights,
+    clear_mcmeta_table_current_cell,
     configure_mcmeta_standard_action_table,
     mcmeta_standard_wrap_action_button,
     reapply_mcmeta_standard_action_table_theme,
@@ -252,7 +255,7 @@ class UiTestPage(QWidget):
 
         self._content_rows: list[ContentRow] = generate_content_rows(20)
         self._content_list = ContentListTableWidget(self._content_rows, theme_id=theme_id)
-        self._content_list.setObjectName("UiTestContentListTable")
+        self._content_list.setObjectName("UITestContentListTable")
         self._content_list_host = QWidget()
         self._content_list_host.setObjectName("UiTestContentListSection")
         _cl_host_lay = QVBoxLayout(self._content_list_host)
@@ -297,6 +300,7 @@ class UiTestPage(QWidget):
             self._theme_id,
             column_labels=("说明", "", ""),
         )
+        self._mcmeta_demo_table.setObjectName("UITestActionTable")
         _demo_rows: list[tuple[str, bool]] = [
             ("已安装样本（应用 + 清除）", True),
             ("未安装样本（仅下载）", False),
@@ -339,7 +343,18 @@ class UiTestPage(QWidget):
             )
         apply_mcmeta_standard_table_row_heights(self._mcmeta_demo_table, self._theme_id)
         self._mcmeta_hover.set_hover_row(None)
+        clear_mcmeta_table_current_cell(self._mcmeta_demo_table)
         mcmeta_sec_lay.addWidget(self._mcmeta_demo_table)
+        bind_ui_test_tables_to_metro10_list_profile(
+            content_list=self._content_list,
+            action_table=self._mcmeta_demo_table,
+            theme_id=self._theme_id,
+        )
+        bind_ui_test_tables_to_minecraft_list_profile(
+            content_list=self._content_list,
+            action_table=self._mcmeta_demo_table,
+            theme_id=self._theme_id,
+        )
         v.addWidget(self._mcmeta_section)
 
         self._view_mode_combo.currentTextChanged.connect(self._on_content_view_mode_changed)
@@ -660,6 +675,16 @@ class UiTestPage(QWidget):
         self._content_list.apply_list_theme(s.theme_id)
         reapply_mcmeta_standard_action_table_theme(
             self._mcmeta_demo_table, self._mcmeta_hover, self._theme_id
+        )
+        bind_ui_test_tables_to_metro10_list_profile(
+            content_list=self._content_list,
+            action_table=self._mcmeta_demo_table,
+            theme_id=self._theme_id,
+        )
+        bind_ui_test_tables_to_minecraft_list_profile(
+            content_list=self._content_list,
+            action_table=self._mcmeta_demo_table,
+            theme_id=self._theme_id,
         )
         self._update_content_tile_viewport_size()
 

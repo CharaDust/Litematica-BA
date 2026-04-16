@@ -75,19 +75,26 @@ class SnbtProperties:
     minecraft_data_version: int = 0
     preview_image_data: list[int] = field(default_factory=list)
     regions: list[RegionInfo] = field(default_factory=list)
+    # 分阶段加载标记：阶段一（元数据）和阶段二（区域几何信息）已加载，阶段三（方块数据）按需加载
+    _metadata_loaded: bool = field(default=False, repr=False)
+    _regions_geo_loaded: bool = field(default=False, repr=False)
+    # 保留原始 NBT 根标签引用，供阶段三按需加载区域详细数据
+    _root_tag: Any = field(default=None, repr=False)
 
 
 def copy_snbt_properties(data: SnbtProperties) -> SnbtProperties:
     """返回 ``SnbtProperties`` 的独立副本。
 
     ``preview_image_data`` 必须 ``list(...)`` 复制，否则快照与当前编辑会共享同一列表引用；
-    ``regions`` 逐行复制为新的 ``RegionInfo``；其余字段为不可变或标量，浅拷贝 ``replace`` 即可。
+    ``regions`` 逐行复制为新的 ``RegionInfo``；
+    ``_root_tag`` 置为 None 避免共享 NBT 引用（快照不需要阶段三数据）。
     用于「恢复默认值」基线与 ``_current_data`` 分离。
     """
     return replace(
         data,
         preview_image_data=list(data.preview_image_data),
         regions=[RegionInfo(r.source_key, r.name, r.size, r.position) for r in data.regions],
+        _root_tag=None,
     )
 
 
@@ -188,12 +195,8 @@ def _apply_region_renames(root: Any, regions: list[RegionInfo], CompoundTag: Any
     root["Regions"] = new_compound
 
 
-def load_snbt_properties(file_path: str | Path) -> SnbtProperties:
-    """读取 .litematic，抽出 ``Metadata`` 与根级 ``Version`` 等到 ``SnbtProperties``。"""
-    _, _, _, _, NamedTag, _, load = _import_amulet_nbt()
-    path = Path(file_path)
-    nbt: NamedTag = load(str(path), compressed=True)
-    root = nbt.tag
+def _load_stage1_metadata(root: Any, path: Path) -> SnbtProperties:
+    """阶段一：读取头部元数据（除 Regions 外的所有字段）。"""
     metadata = root.get("Metadata", {})
     enclosing = metadata.get("EnclosingSize", {})
 
@@ -209,7 +212,7 @@ def load_snbt_properties(file_path: str | Path) -> SnbtProperties:
     if mc_data_ver == 0:
         mc_data_ver = _to_int(root.get("MinecraftDataVersion"), 0)
 
-    props = SnbtProperties(
+    return SnbtProperties(
         file_path=path,
         file_name=path.name,
         internal_name=_to_str(metadata.get("Name"), ""),
@@ -227,9 +230,65 @@ def load_snbt_properties(file_path: str | Path) -> SnbtProperties:
         litematic_version=_to_int(root.get("Version"), 0),
         minecraft_data_version=mc_data_ver,
         preview_image_data=preview_data,
-        regions=_parse_regions_list(root),
+        regions=[],
+        _metadata_loaded=True,
+        _regions_geo_loaded=False,
+        _root_tag=None,
     )
+
+
+def _load_stage2_regions_geo(root: Any, props: SnbtProperties) -> None:
+    """阶段二：读取区域几何信息（仅 Position 和 Size）。"""
+    props.regions = _parse_regions_list(root)
+    props._regions_geo_loaded = True
+
+
+def load_snbt_properties(file_path: str | Path) -> SnbtProperties:
+    """读取 .litematic，抽出 ``Metadata`` 与根级 ``Version`` 等到 ``SnbtProperties``。
+
+    采用分阶段读取策略（逻辑分层）：
+    - 阶段一：读取头部元数据（除 Regions 外）
+    - 阶段二：读取区域几何信息（Position 和 Size）
+    - 阶段三：按需使用 ``_root_tag`` 访问 BlockStates、Entities 等
+
+    注意：``amulet_nbt.load(compressed=True)`` 会一次性解压并解析**整份** NBT（含各区域方块数据），
+    大文件的主要耗时在此。若在同进程后台线程中调用，仍可能与 Qt 主线程争夺 CPython GIL 导致整窗假死；
+    属性页对大文件改用 ``mp_load_snbt_properties_for_ui`` 在**子进程**中执行本函数。
+    """
+    _, _, _, _, NamedTag, _, load = _import_amulet_nbt()
+    path = Path(file_path)
+    nbt: NamedTag = load(str(path), compressed=True)
+    root = nbt.tag
+
+    # 阶段一：加载头部元数据
+    props = _load_stage1_metadata(root, path)
+
+    # 阶段二：加载区域几何信息
+    _load_stage2_regions_geo(root, props)
+
+    # 保留原始 NBT 根标签引用，供阶段三按需加载
+    props._root_tag = root
+
     return props
+
+
+def mp_load_snbt_properties_for_ui(path_str: str, result_queue: Any) -> None:
+    """多进程 ``spawn`` 目标函数（须为本模块顶层，供 Windows pickle）。
+
+    在**独立解释器**中调用 :func:`load_snbt_properties`，再 ``dataclasses.replace`` 去掉 ``_root_tag``
+    后 ``pickle`` 写回队列，仅传元数据与区域几何，避免把大块 NBT 树带回主进程。
+    """
+    import pickle
+
+    try:
+        props = load_snbt_properties(Path(path_str))
+        props = replace(props, _root_tag=None)
+        result_queue.put(("ok", pickle.dumps(props)))
+    except Exception as exc:
+        try:
+            result_queue.put(("err", str(exc)))
+        except Exception:
+            pass
 
 
 def save_snbt_properties(data: SnbtProperties, output_path: str | Path | None = None) -> Path:

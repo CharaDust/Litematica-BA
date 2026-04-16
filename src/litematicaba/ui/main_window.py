@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QGuiApplication, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -13,7 +16,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from litematicaba.core.settings import AppSettings, load_settings
+from litematicaba.core.settings import (
+    BLOCK_ICON_PRELOAD_NEVER,
+    BLOCK_ICON_PRELOAD_ON_LITEMATIC,
+    BLOCK_ICON_PRELOAD_ON_MATERIAL_OR_FLAKE,
+    BLOCK_ICON_PRELOAD_STARTUP,
+    MATERIAL_LIST_PREWARM_ON_LITEMATIC,
+    AppSettings,
+    load_settings,
+)
+from litematicaba.ui.material_list_icon_prewarmer import (
+    MaterialListIconPrewarmer,
+    attach_material_list_icon_prewarmer,
+    register_material_ui_icon_prewarm_hook,
+)
+from litematicaba.ui.material_list_scan_prewarmer import MaterialListScanPrewarmer
 from litematicaba.ui.pages import (
     FlakePage,
     HomePage,
@@ -60,12 +77,29 @@ class MainWindow(QWidget):
         self._stack = QStackedWidget()
         self._stack.addWidget(HomePage())
         self._stack.addWidget(LibraryPage())
-        self._properties_page = PropertiesPage()
+        self._properties_page = PropertiesPage(app_settings=self._settings)
         self._stack.addWidget(self._properties_page)
-        self._statistics_page = StatisticsPage(self._properties_page)
+        self._material_list_scan_prewarmer = MaterialListScanPrewarmer(self)
+        self._icon_prewarm_session_litematic = False
+        self._icon_prewarm_session_material_ui = False
+        self._initial_icon_prewarm_scheduled = False
+        self._properties_page.active_file_changed.connect(self._on_properties_active_file_changed)
+        self._statistics_page = StatisticsPage(
+            self._properties_page,
+            material_scan_prewarmer=self._material_list_scan_prewarmer,
+            defer_stats_until_material_prewarm=self._stats_wait_material_prewarm,
+        )
         self._stack.addWidget(self._statistics_page)
-        self._stack.addWidget(FlakePage(self._properties_page))
-        self._render_page = RenderPage(self._properties_page, app_settings=self._settings)
+        self._flake_page = FlakePage(
+            self._properties_page,
+            material_scan_prewarmer=self._material_list_scan_prewarmer,
+        )
+        self._stack.addWidget(self._flake_page)
+        self._render_page = RenderPage(
+            self._properties_page,
+            app_settings=self._settings,
+            material_scan_prewarmer=self._material_list_scan_prewarmer,
+        )
         self._stack.addWidget(self._render_page)
         self._stack.addWidget(ReplacePage())
         self._ui_test_page = UiTestPage(
@@ -165,11 +199,28 @@ class MainWindow(QWidget):
         self._widget_inspector.set_enabled(self._settings.show_widget_inspector)
         self._perf_test = PerfTestController(self)
         self._perf_test.set_enabled(self._settings.perf_test_overlay)
+        self._material_list_icon_prewarmer = MaterialListIconPrewarmer(
+            self, config_provider=self._block_icon_prewarm_config
+        )
+        attach_material_list_icon_prewarmer(self._material_list_icon_prewarmer)
+        register_material_ui_icon_prewarm_hook(self._maybe_start_icon_prewarm_from_material_ui)
         self._btn_home.setChecked(True)
         self._stack.setCurrentIndex(PAGE_HOME)
 
         # 避免子控件（如主页 Logo）曾出现过大 minimumSize 后把整窗最小宽度锁死
         self.setMinimumSize(0, 0)
+
+    def _block_icon_prewarm_config(self) -> tuple[int, int, str]:
+        s = self._settings.normalized()
+        return (
+            s.block_icon_prewarm_batch_interval_ms,
+            s.block_icon_prewarm_batch_count,
+            s.block_icon_prewarm_decode_thread,
+        )
+
+    def schedule_material_list_icon_prewarm(self) -> None:
+        """窗口先完成首帧绘制后再预载图标，减轻与冷启动争用。"""
+        QTimer.singleShot(1200, self._material_list_icon_prewarmer.start)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -181,6 +232,10 @@ class MainWindow(QWidget):
         self._widget_inspector.sync_geometry()
         self._perf_test.sync_geometry()
         self._clamp_window_to_available_geometry()
+        if not self._initial_icon_prewarm_scheduled:
+            self._initial_icon_prewarm_scheduled = True
+            if self._settings.block_icon_preload_mode == BLOCK_ICON_PRELOAD_STARTUP:
+                self.schedule_material_list_icon_prewarm()
 
     def _clamp_window_to_available_geometry(self) -> None:
         screen = QGuiApplication.primaryScreen()
@@ -255,7 +310,34 @@ class MainWindow(QWidget):
         self._properties_page.apply_regions_table_theme()
         self._stack.setCurrentIndex(PAGE_PROPERTIES)
 
+    def _stats_wait_material_prewarm(self) -> bool:
+        return self._settings.material_list_prewarm_mode == MATERIAL_LIST_PREWARM_ON_LITEMATIC
+
+    def _on_properties_active_file_changed(self, path_str: str) -> None:
+        p = Path(path_str)
+        if self._settings.material_list_prewarm_mode == MATERIAL_LIST_PREWARM_ON_LITEMATIC:
+            self._material_list_scan_prewarmer.schedule(p)
+        self._maybe_start_icon_prewarm_on_litematic()
+
+    def _maybe_start_icon_prewarm_on_litematic(self) -> None:
+        if self._settings.block_icon_preload_mode != BLOCK_ICON_PRELOAD_ON_LITEMATIC:
+            return
+        if self._icon_prewarm_session_litematic:
+            return
+        self._icon_prewarm_session_litematic = True
+        self._material_list_icon_prewarmer.start()
+
+    def _maybe_start_icon_prewarm_from_material_ui(self) -> None:
+        if self._settings.block_icon_preload_mode != BLOCK_ICON_PRELOAD_ON_MATERIAL_OR_FLAKE:
+            return
+        if self._icon_prewarm_session_material_ui:
+            return
+        self._icon_prewarm_session_material_ui = True
+        self._material_list_icon_prewarmer.start()
+
     def _on_settings_changed(self, s: AppSettings) -> None:
+        old_icon = self._settings.block_icon_preload_mode
+        old_decode_thread = self._settings.block_icon_prewarm_decode_thread
         self._settings = s
         apply_theme(QApplication.instance(), s.theme_id)
         self._btn_ui_test.setVisible(s.show_ui_test_nav)
@@ -263,7 +345,23 @@ class MainWindow(QWidget):
         self._perf_test.set_enabled(s.perf_test_overlay)
         self._ui_test_page.apply_settings(s)
         self._properties_page.apply_regions_table_theme()
+        self._properties_page.apply_app_settings(s)
         self._render_page.apply_deepslate_settings(s)
         self._apply_sidebar_geometry()
+        if s.block_icon_preload_mode != old_icon:
+            self._icon_prewarm_session_litematic = False
+            self._icon_prewarm_session_material_ui = False
+        if s.block_icon_preload_mode == BLOCK_ICON_PRELOAD_NEVER:
+            self._material_list_icon_prewarmer.stop()
+        elif s.block_icon_preload_mode == BLOCK_ICON_PRELOAD_STARTUP and old_icon != BLOCK_ICON_PRELOAD_STARTUP:
+            self.schedule_material_list_icon_prewarm()
+        elif (
+            s.block_icon_preload_mode != BLOCK_ICON_PRELOAD_NEVER
+            and self._material_list_icon_prewarmer.is_active()
+        ):
+            if s.block_icon_prewarm_decode_thread != old_decode_thread:
+                self._material_list_icon_prewarmer.restart()
+            else:
+                self._material_list_icon_prewarmer.apply_live_config()
         if not s.show_ui_test_nav and self._stack.currentIndex() == PAGE_UI_TEST:
             self._stack.setCurrentIndex(PAGE_HOME)

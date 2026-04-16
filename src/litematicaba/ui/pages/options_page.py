@@ -23,7 +23,20 @@ from PySide6.QtWidgets import (
 
 from litematicaba.core.config import user_data_dir
 from litematicaba.core.render_bundle_update import show_renderer_update_info
+from litematicaba.core.material_list_icon_pixmap_cache import material_list_icon_prewarm_cache_has_entries
 from litematicaba.core.settings import (
+    BLOCK_ICON_PRELOAD_NEVER,
+    BLOCK_ICON_PRELOAD_ON_LITEMATIC,
+    BLOCK_ICON_PRELOAD_ON_MATERIAL_OR_FLAKE,
+    BLOCK_ICON_PRELOAD_STARTUP,
+    BLOCK_ICON_PREWARM_DECODE_MAIN,
+    BLOCK_ICON_PREWARM_DECODE_WORKER,
+    DEFAULT_BLOCK_ICON_PRELOAD_MODE,
+    DEFAULT_BLOCK_ICON_PREWARM_BATCH_COUNT,
+    DEFAULT_BLOCK_ICON_PREWARM_BATCH_INTERVAL_MS,
+    DEFAULT_LITEMATIC_ASYNC_LOAD_MIN_BYTES,
+    MATERIAL_LIST_PREWARM_ON_LITEMATIC,
+    MATERIAL_LIST_PREWARM_ON_MATERIAL_LIST,
     NBT_EXPORT_FULL_MARGIN_DEFAULT,
     NBT_EXPORT_FULL_ORTHOGRAPHIC_DIAG_EXTRA_DEFAULT,
     NBT_EXPORT_FULL_ORTHOGRAPHIC_HALF_HEIGHT_MIN_DEFAULT,
@@ -37,6 +50,7 @@ from litematicaba.core.settings import (
     AppSettings,
     save_settings,
 )
+from litematicaba.ui.game_resource_block_icon_dialog import GameResourceBlockIconDialog
 from litematicaba.ui.game_resource_language_dialog import GameResourceLanguageDialog
 from litematicaba.ui.mcmeta_version_picker_dialog import McmetaVersionPickerDialog
 
@@ -49,6 +63,7 @@ class OptionsPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._loading = True
+        self._committed_block_icon_mode = DEFAULT_BLOCK_ICON_PRELOAD_MODE
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -91,6 +106,65 @@ class OptionsPage(QWidget):
         self._tile_view_right_padding_px.setSuffix(" px")
         form_dev.addRow("磁贴视图右侧留白：", self._tile_view_right_padding_px)
 
+        g_perf = QGroupBox("性能与预加载")
+        form_perf = QFormLayout(g_perf)
+        perf_hint = QLabel(
+            "更改以下选项不会清除已缓存的材料列表磁盘数据，也不会清除已解码的方块图标内存；"
+            "切换「应用到材料列表」的图标包时仍会按规则使图标缓存失效。"
+        )
+        perf_hint.setWordWrap(True)
+        perf_hint.setStyleSheet("color: palette(mid);")
+        form_perf.addRow(perf_hint)
+        self._block_icon_preload = QComboBox()
+        self._block_icon_preload.addItem("软件启动时（默认）", BLOCK_ICON_PRELOAD_STARTUP)
+        self._block_icon_preload.addItem("首次加载投影文件时", BLOCK_ICON_PRELOAD_ON_LITEMATIC)
+        self._block_icon_preload.addItem("首次点击材料列表或分层时", BLOCK_ICON_PRELOAD_ON_MATERIAL_OR_FLAKE)
+        self._block_icon_preload.addItem("不加载方块图标（回退手段）", BLOCK_ICON_PRELOAD_NEVER)
+        form_perf.addRow("方块图标预加载时机：", self._block_icon_preload)
+        self._material_list_prewarm = QComboBox()
+        self._material_list_prewarm.addItem(
+            "首次加载投影文件时（默认）", MATERIAL_LIST_PREWARM_ON_LITEMATIC
+        )
+        self._material_list_prewarm.addItem(
+            "首次点击材料列表时", MATERIAL_LIST_PREWARM_ON_MATERIAL_LIST
+        )
+        form_perf.addRow("材料列表计算时机：", self._material_list_prewarm)
+        self._litematic_async_load_min_kb = QSpinBox()
+        self._litematic_async_load_min_kb.setRange(0, 512 * 1024)
+        self._litematic_async_load_min_kb.setSuffix(" KB")
+        self._litematic_async_load_min_kb.setToolTip(
+            "磁盘上投影文件大小 **大于** 该值时，在后台线程执行 NBT 加载并显示可中断的进度；"
+            "否则在主线程直接加载（通常更快）。"
+            f" 默认 {DEFAULT_LITEMATIC_ASYNC_LOAD_MIN_BYTES // 1024} KB。"
+        )
+        form_perf.addRow("投影后台加载阈值：", self._litematic_async_load_min_kb)
+        self._block_icon_prewarm_interval_ms = QSpinBox()
+        self._block_icon_prewarm_interval_ms.setRange(0, 2000)
+        self._block_icon_prewarm_interval_ms.setSingleStep(1)
+        self._block_icon_prewarm_interval_ms.setSuffix(" ms")
+        self._block_icon_prewarm_interval_ms.setToolTip(
+            "主线程将解码结果写入缓存时的定时器间隔；0 表示尽快触发（仍受事件循环调度）。"
+            f"默认 {DEFAULT_BLOCK_ICON_PREWARM_BATCH_INTERVAL_MS} ms。"
+        )
+        form_perf.addRow("图标预载批次间隔：", self._block_icon_prewarm_interval_ms)
+        self._block_icon_prewarm_batch_count = QSpinBox()
+        self._block_icon_prewarm_batch_count.setRange(1, 500)
+        self._block_icon_prewarm_batch_count.setToolTip(
+            "每个批次在主线程最多处理的图标数量（写入缓存）。"
+            f"默认 {DEFAULT_BLOCK_ICON_PREWARM_BATCH_COUNT}。"
+        )
+        form_perf.addRow("图标预载批次数量：", self._block_icon_prewarm_batch_count)
+        self._block_icon_prewarm_decode_thread = QComboBox()
+        self._block_icon_prewarm_decode_thread.addItem("主线程", BLOCK_ICON_PREWARM_DECODE_MAIN)
+        self._block_icon_prewarm_decode_thread.addItem(
+            "工作线程（实验性）", BLOCK_ICON_PREWARM_DECODE_WORKER
+        )
+        self._block_icon_prewarm_decode_thread.setToolTip(
+            "主线程：在工作线程只读文件，在主线程解码 PNG。"
+            " 工作线程：在工作线程解码并缩放到 32×32，主线程仅转为 QPixmap 并写入缓存（实验性）。"
+        )
+        form_perf.addRow("图标预载解码线程：", self._block_icon_prewarm_decode_thread)
+
         g_render = QGroupBox("Deepslate 渲染")
         form_render = QFormLayout(g_render)
         hint_render = QLabel(
@@ -128,6 +202,9 @@ class OptionsPage(QWidget):
         self._btn_lang_manage = QPushButton("管理游戏语言...")
         self._btn_lang_manage.clicked.connect(self._on_lang_manage_clicked)
         form_nbt.addRow(self._btn_lang_manage)
+        self._btn_block_icon_manage = QPushButton("管理方块图标...")
+        self._btn_block_icon_manage.clicked.connect(self._on_block_icon_manage_clicked)
+        form_nbt.addRow(self._btn_block_icon_manage)
         self._nbt_viewer_camera_debug = QCheckBox(
             "在 NBT 3D 预览中显示相机调试信息（cPos、cRot、与目标距离 cDist、结构尺寸等）"
         )
@@ -226,6 +303,7 @@ class OptionsPage(QWidget):
 
         body_lay.addWidget(g_theme)
         body_lay.addWidget(g_dev)
+        body_lay.addWidget(g_perf)
         body_lay.addWidget(g_render)
         body_lay.addWidget(g_nbt)
         body_lay.addWidget(g_nbt_export)
@@ -250,6 +328,12 @@ class OptionsPage(QWidget):
         self._nbt_export_ortho_diag.valueChanged.connect(self._persist)
         self._nbt_export_ortho_min.valueChanged.connect(self._persist)
         self._nbt_export_ortho_hmin.valueChanged.connect(self._persist)
+        self._block_icon_preload.currentIndexChanged.connect(self._on_block_icon_preload_changed)
+        self._material_list_prewarm.currentIndexChanged.connect(self._persist)
+        self._litematic_async_load_min_kb.valueChanged.connect(self._persist)
+        self._block_icon_prewarm_interval_ms.valueChanged.connect(self._persist)
+        self._block_icon_prewarm_batch_count.valueChanged.connect(self._persist)
+        self._block_icon_prewarm_decode_thread.currentIndexChanged.connect(self._persist)
 
         self._loading = False
 
@@ -276,6 +360,16 @@ class OptionsPage(QWidget):
         self._nbt_export_ortho_diag.setValue(s.nbt_export_full_orthographic_diag_extra)
         self._nbt_export_ortho_min.setValue(s.nbt_export_full_orthographic_min_distance)
         self._nbt_export_ortho_hmin.setValue(s.nbt_export_full_orthographic_half_height_min)
+        bidx = self._block_icon_preload.findData(s.block_icon_preload_mode)
+        self._block_icon_preload.setCurrentIndex(bidx if bidx >= 0 else 0)
+        midx = self._material_list_prewarm.findData(s.material_list_prewarm_mode)
+        self._material_list_prewarm.setCurrentIndex(midx if midx >= 0 else 0)
+        self._block_icon_prewarm_interval_ms.setValue(s.block_icon_prewarm_batch_interval_ms)
+        self._block_icon_prewarm_batch_count.setValue(s.block_icon_prewarm_batch_count)
+        self._litematic_async_load_min_kb.setValue(max(0, s.litematic_async_load_min_bytes // 1024))
+        tidx = self._block_icon_prewarm_decode_thread.findData(s.block_icon_prewarm_decode_thread)
+        self._block_icon_prewarm_decode_thread.setCurrentIndex(tidx if tidx >= 0 else 0)
+        self._committed_block_icon_mode = self._block_icon_preload.currentData()
         self._refresh_nbt_mcmeta_status_label()
         self._loading = False
 
@@ -301,6 +395,12 @@ class OptionsPage(QWidget):
             nbt_export_full_orthographic_diag_extra=self._nbt_export_ortho_diag.value(),
             nbt_export_full_orthographic_min_distance=self._nbt_export_ortho_min.value(),
             nbt_export_full_orthographic_half_height_min=self._nbt_export_ortho_hmin.value(),
+            block_icon_preload_mode=self._block_icon_preload.currentData(),
+            material_list_prewarm_mode=self._material_list_prewarm.currentData(),
+            block_icon_prewarm_batch_interval_ms=self._block_icon_prewarm_interval_ms.value(),
+            block_icon_prewarm_batch_count=self._block_icon_prewarm_batch_count.value(),
+            block_icon_prewarm_decode_thread=self._block_icon_prewarm_decode_thread.currentData(),
+            litematic_async_load_min_bytes=self._litematic_async_load_min_kb.value() * 1024,
         ).normalized()
 
     def _on_deepslate_update_clicked(self) -> None:
@@ -361,6 +461,36 @@ class OptionsPage(QWidget):
     def _on_lang_manage_clicked(self) -> None:
         dlg = GameResourceLanguageDialog(self)
         dlg.exec()
+
+    def _on_block_icon_manage_clicked(self) -> None:
+        dlg = GameResourceBlockIconDialog(self)
+        dlg.exec()
+
+    def _on_block_icon_preload_changed(self, index: int) -> None:
+        if self._loading:
+            return
+        new_mode = self._block_icon_preload.itemData(index)
+        old_committed = self._committed_block_icon_mode
+        if (
+            new_mode == BLOCK_ICON_PRELOAD_STARTUP
+            and old_committed != BLOCK_ICON_PRELOAD_STARTUP
+            and not material_list_icon_prewarm_cache_has_entries()
+        ):
+            r = QMessageBox.question(
+                self,
+                "方块图标预加载",
+                "现在将立即加载图标，可能会影响性能，你确定要继续吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if r != QMessageBox.StandardButton.Yes:
+                self._loading = True
+                revert = self._block_icon_preload.findData(old_committed)
+                self._block_icon_preload.setCurrentIndex(revert if revert >= 0 else 0)
+                self._loading = False
+                return
+        self._committed_block_icon_mode = new_mode
+        self._persist()
 
     def _persist(self) -> None:
         if self._loading:

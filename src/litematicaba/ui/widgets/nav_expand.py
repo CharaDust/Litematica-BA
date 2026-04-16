@@ -43,8 +43,11 @@ class NavExpandButton(QPushButton):
         return tid in _WIN10_SIDEBAR_THEMES
 
     def _apply_nav_theme_attrs(self) -> None:
-        win10 = self._use_win10_sidebar()
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, not win10)
+        app = QApplication.instance()
+        tid = current_theme_id(app) if app is not None else "QTDefault"
+        win10 = tid in _WIN10_SIDEBAR_THEMES
+        mc = tid == "Minecraft"
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, not (win10 or mc))
         self.setMinimumHeight(48)
         self.setMaximumHeight(48)
 
@@ -56,17 +59,21 @@ class NavExpandButton(QPushButton):
 
     def enterEvent(self, event: QEnterEvent) -> None:
         super().enterEvent(event)
-        if self._use_win10_sidebar():
+        app = QApplication.instance()
+        tid = current_theme_id(app) if app is not None else "QTDefault"
+        if tid in _WIN10_SIDEBAR_THEMES or tid == "Minecraft":
             self.update()
 
     def leaveEvent(self, event) -> None:
         super().leaveEvent(event)
-        if self._use_win10_sidebar():
+        app = QApplication.instance()
+        tid = current_theme_id(app) if app is not None else "QTDefault"
+        if tid in _WIN10_SIDEBAR_THEMES or tid == "Minecraft":
             self.update()
 
     @staticmethod
-    def _draw_hamburger(p: QPainter, rect: QRect) -> None:
-        p.setPen(QPen(_FG, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap))
+    def _draw_hamburger(p: QPainter, rect: QRect, color: QColor | None = None) -> None:
+        p.setPen(QPen(color if color else _FG, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap))
         x1, x2 = rect.left() + 1, rect.right() - 1
         h = rect.height()
         y1 = rect.top() + h // 4
@@ -77,23 +84,39 @@ class NavExpandButton(QPushButton):
         p.drawLine(x1, y3, x2, y3)
 
     def paintEvent(self, event) -> None:
-        if not self._use_win10_sidebar():
+        app = QApplication.instance()
+        tid = current_theme_id(app) if app is not None else "QTDefault"
+        is_win10 = tid in _WIN10_SIDEBAR_THEMES
+        is_mc = tid == "Minecraft"
+
+        if not is_win10 and not is_mc:
             super().paintEvent(event)
             return
 
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         r = self.rect()
-        hover = self.underMouse() and self.isEnabled()
 
-        bg = _BG_HOVER if hover else _BG
-        p.fillRect(r, bg)
-        if hover:
-            p.setPen(QPen(_BORDER_HOVER, 1))
-            p.drawRect(r.adjusted(0, 0, -1, -1))
+        if is_win10:
+            hover = self.underMouse() and self.isEnabled()
+            bg = _BG_HOVER if hover else _BG
+            p.fillRect(r, bg)
+            if hover:
+                p.setPen(QPen(_BORDER_HOVER, 1))
+                p.drawRect(r.adjusted(0, 0, -1, -1))
+        else:
+            # Minecraft 主题背景
+            from PySide6.QtWidgets import QStyleOptionButton, QStyle
+            opt = QStyleOptionButton()
+            self.initStyleOption(opt)
+            opt.text = ""
+            self.style().drawControl(QStyle.ControlElement.CE_PushButton, opt, p, self)
 
-        # 三横线 16×16，置于 48×48 槽位正中（展开时槽位为左侧 48px；收起时为整行宽）
-        if self._sidebar_expanded:
+        # 三横线颜色：Win10 为黑色，MC 为白色
+        fg_color = QColor("white") if is_mc else _FG
+        
+        # 三横线位置：收起时居中；展开时 Win10 在左侧槽位，MC 居中（因为没有文字）
+        if self._sidebar_expanded and is_win10:
             hx = (_ICON_SLOT - _HAMBURGER_PX) // 2
             hy = (r.height() - _HAMBURGER_PX) // 2
             ham = QRect(hx, hy, _HAMBURGER_PX, _HAMBURGER_PX)
@@ -102,9 +125,9 @@ class NavExpandButton(QPushButton):
             hy = (r.height() - _HAMBURGER_PX) // 2
             ham = QRect(hx, hy, _HAMBURGER_PX, _HAMBURGER_PX)
 
-        self._draw_hamburger(p, ham)
+        self._draw_hamburger(p, ham, fg_color)
 
-        if self._sidebar_expanded:
+        if self._sidebar_expanded and is_win10:
             f = self.font()
             f.setBold(True)
             p.setFont(f)
