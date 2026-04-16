@@ -52,9 +52,9 @@ def _github_dir() -> Path:
 
 def _bundled_lang_file(name: str) -> Path:
     # 与 legacy_statistics 等一致：project_root() 在 frozen 下为 _MEIPASS。
-    return project_root() / "lang" / name
+    return project_root() / "pack-in" / "lang" / name
 
-
+# 初始化解包语言
 def ensure_initial_language_seeded() -> None:
     init_dir = _initial_dir()
     init_dir.mkdir(parents=True, exist_ok=True)

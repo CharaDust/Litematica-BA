@@ -14,7 +14,7 @@ from litematicaba.core.litematic_block_scan import scan_litematic
 
 
 def _load_category_ordered() -> list[tuple[str, list[str]]]:
-    path = project_root() / "lang" / "category.json"
+    path = project_root() / "pack-in" / "lang" / "category.json"
     if not path.is_file():
         return []
     raw = json.loads(path.read_text(encoding="utf-8"))
