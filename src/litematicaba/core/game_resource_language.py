@@ -50,25 +50,44 @@ def _github_dir() -> Path:
     return _language_root() / "github" / "InventivetalentDev"
 
 # pack-in 语言位置
+def _legacy_dir() -> Path:
+    return user_data_dir() / "legacy"
+
+
 def _bundled_lang_file(name: str) -> Path:
     # 与 legacy_statistics 等一致：project_root() 在 frozen 下为 _MEIPASS。
     return project_root() / "pack-in" / "lang" / name
 
+
+def _bundled_legacy_file(name: str) -> Path:
+    return project_root() / "pack-in" / "legacy" / name
+
+
 # 初始化解包语言
 def ensure_initial_language_seeded() -> None:
+    # 1. 游戏语言 zh_cn.json
     init_dir = _initial_dir()
     init_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("zh_cn.json", "category.json"):
-        dst = init_dir / name
-        if dst.is_file():
-            continue
-        src = _bundled_lang_file(name)
-        if not src.is_file():
-            continue
-        try:
-            dst.write_bytes(src.read_bytes())
-        except OSError:
-            continue
+    dst_lang = init_dir / "zh_cn.json"
+    if not dst_lang.is_file():
+        src_lang = _bundled_lang_file("zh_cn.json")
+        if src_lang.is_file():
+            try:
+                dst_lang.write_bytes(src_lang.read_bytes())
+            except OSError:
+                pass
+
+    # 2. 遗留分类 category.json -> data/legacy
+    leg_dir = _legacy_dir()
+    leg_dir.mkdir(parents=True, exist_ok=True)
+    dst_cat = leg_dir / "category.json"
+    if not dst_cat.is_file():
+        src_cat = _bundled_legacy_file("category.json")
+        if src_cat.is_file():
+            try:
+                dst_cat.write_bytes(src_cat.read_bytes())
+            except OSError:
+                pass
 
 
 def _index_path() -> Path:

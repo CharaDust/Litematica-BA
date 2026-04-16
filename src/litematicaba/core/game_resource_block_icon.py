@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import zipfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,8 +41,8 @@ def _minecraft_assets_root() -> Path:
     return user_data_dir() / "minecraft-assets"
 
 
-def _bundled_block_dir() -> Path:
-    return project_root() / "block"
+def _bundled_block_zip() -> Path:
+    return project_root() / "pack-in" / "arr-private" / "block.zip"
 
 
 def block_2d_initial_dir() -> Path:
@@ -89,9 +90,9 @@ _BLOCK_2D_SEED_SENTINEL = ".lba_block_2d_seed"
 
 
 def ensure_initial_block_2d_seeded() -> None:
-    """首次将安装包内 ``block/`` 树复制到 ``block_2d/initial``（与语言内建逻辑一致）。
+    """首次将安装包内 ``pack-in/arr-private/block.zip`` 解压到 ``block_2d/initial``。
 
-    已完成后写入哨兵；后续调用立即返回，避免每次 ``rglob`` 整棵源树导致长时间主线程卡顿。
+    已完成后写入哨兵；后续调用立即返回，避免每次解压导致长时间主线程卡顿。
     """
     dst_root = block_2d_initial_dir()
     dst_root.mkdir(parents=True, exist_ok=True)
@@ -104,28 +105,19 @@ def ensure_initial_block_2d_seeded() -> None:
     except OSError:
         pass
 
-    src_root = _bundled_block_dir()
-    if not src_root.is_dir():
+    src_zip = _bundled_block_zip()
+    if not src_zip.is_file():
         try:
             sentinel.write_text(_BLOCK_2D_INITIAL_SEED_VERSION, encoding="utf-8")
         except OSError:
             pass
         return
-    for path in src_root.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(src_root)
-        dst = dst_root / rel
-        if dst.is_file():
-            continue
-        try:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_bytes(path.read_bytes())
-        except OSError:
-            continue
+
     try:
+        with zipfile.ZipFile(src_zip, "r") as zf:
+            zf.extractall(dst_root)
         sentinel.write_text(_BLOCK_2D_INITIAL_SEED_VERSION, encoding="utf-8")
-    except OSError:
+    except (OSError, zipfile.BadZipFile):
         pass
 
 
