@@ -49,7 +49,7 @@ def _initial_dir() -> Path:
 def _github_dir() -> Path:
     return _language_root() / "github" / "InventivetalentDev"
 
-
+# pack-in 语言位置
 def _bundled_lang_file(name: str) -> Path:
     # 与 legacy_statistics 等一致：project_root() 在 frozen 下为 _MEIPASS。
     return project_root() / "pack-in" / "lang" / name
