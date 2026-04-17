@@ -743,6 +743,12 @@ class RenderPage(QWidget):
     def _on_active_file_changed(self, _path: str) -> None:
         self._sync_path_label()
         self._sync_region_combo()
+        if self._use_nbt_viewer and self._view is not None:
+            # 切换文件时强制重新加载 HTML 以清空上一个文件的 JS 状态
+            self._viewer_ready = False
+            p, _ = resolve_nbt_viewer_html_path(self._nbt_applied_mcmeta_version)
+            if p and p.is_file():
+                self._view.load(QUrl.fromLocalFile(str(p.resolve())))
         self._schedule_load()
 
     def _on_region_changed(self, _index: int) -> None:
