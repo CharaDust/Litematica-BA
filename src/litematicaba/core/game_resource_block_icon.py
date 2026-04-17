@@ -702,6 +702,14 @@ def _find_block_png_under(root: Path, local_id: str) -> Path | None:
     return None
 
 
+def resolve_material_list_icon_path_in_root(block_id: str, root: Path) -> Path | None:
+    """在指定根目录下解析材料列表方块 PNG 路径（不带全局缓存）。"""
+    lid = normalize_material_list_block_local_id(block_id)
+    if not lid:
+        return None
+    return _find_block_png_under(root, lid)
+
+
 _ml_icon_cache: dict[tuple[str, str], Path | None] = {}
 _ml_icon_cache_tag: str = ""
 

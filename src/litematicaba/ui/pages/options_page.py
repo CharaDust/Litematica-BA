@@ -51,6 +51,7 @@ from litematicaba.core.settings import (
     save_settings,
 )
 from litematicaba.ui.game_resource_block_icon_dialog import GameResourceBlockIconDialog
+from litematicaba.ui.game_resource_item_icon_dialog import GameResourceItemIconDialog
 from litematicaba.ui.game_resource_language_dialog import GameResourceLanguageDialog
 from litematicaba.ui.mcmeta_version_picker_dialog import McmetaVersionPickerDialog
 
@@ -205,6 +206,9 @@ class OptionsPage(QWidget):
         self._btn_block_icon_manage = QPushButton("管理方块图标...")
         self._btn_block_icon_manage.clicked.connect(self._on_block_icon_manage_clicked)
         form_nbt.addRow(self._btn_block_icon_manage)
+        self._btn_item_icon_manage = QPushButton("管理物品图标...")
+        self._btn_item_icon_manage.clicked.connect(self._on_item_icon_manage_clicked)
+        form_nbt.addRow(self._btn_item_icon_manage)
         self._nbt_viewer_camera_debug = QCheckBox(
             "在 NBT 3D 预览中显示相机调试信息（cPos、cRot、与目标距离 cDist、结构尺寸等）"
         )
@@ -464,6 +468,10 @@ class OptionsPage(QWidget):
 
     def _on_block_icon_manage_clicked(self) -> None:
         dlg = GameResourceBlockIconDialog(self)
+        dlg.exec()
+
+    def _on_item_icon_manage_clicked(self) -> None:
+        dlg = GameResourceItemIconDialog(self)
         dlg.exec()
 
     def _on_block_icon_preload_changed(self, index: int) -> None:
