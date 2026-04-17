@@ -94,7 +94,13 @@ def _load_block_cn_map() -> dict[str, str]:
 
 def _display_name(block_id: str, cn: dict[str, str]) -> str:
     if block_id.startswith("E/"):
-        return block_id
+        # 实体翻译：E/minecraft:pig -> entity.minecraft.pig
+        raw_entity = block_id[2:]
+        return (
+            cn.get(f"entity.{raw_entity.replace(':', '.')}")
+            or cn.get(f"entity.{raw_entity}")
+            or block_id
+        )
     raw = block_id.split("[")[0].strip()
     if ":" in raw:
         local = raw.split(":", 1)[1]
