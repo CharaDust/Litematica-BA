@@ -28,6 +28,7 @@ from litematicaba.core.game_resource_block_icon import (
     clear_active_layering,
     clear_active_material_list,
     delete_installed_block_visual,
+    download_and_process_vault_icons,
     ensure_initial_block_2d_seeded,
     load_installed_block_visuals,
     register_vault_block_icon_slot,
@@ -44,6 +45,7 @@ from litematicaba.ui.widgets.mcmeta_standard_table import (
     attach_mcmeta_row_hover_to_button,
     clear_mcmeta_table_current_cell,
 )
+from litematicaba.ui.widgets.progress_dialog import GenericProgressDialog
 
 _COL_VER = 0
 _COL_KIND = 1
@@ -51,12 +53,27 @@ _COL_SRC = 2
 _COL_OP = 3
 
 
-class _VaultRegisterWorker(QThread):
+class _VaultDownloadWorker(QThread):
+    progress = Signal(int, int, str)
     finished_ok = Signal(object)
     finished_err = Signal(str)
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._is_canceled = False
+
+    def cancel(self) -> None:
+        self._is_canceled = True
+
+    def _progress_callback(self, current: int, total: int, status: str) -> bool:
+        self.progress.emit(current, total, status)
+        return not self._is_canceled
+
     def run(self) -> None:  # type: ignore[override]
         try:
+            download_and_process_vault_icons(self._progress_callback)
+            if self._is_canceled:
+                return
             self.finished_ok.emit(register_vault_block_icon_slot())
         except Exception as exc:
             self.finished_err.emit(str(exc))
@@ -72,7 +89,7 @@ class GameResourceBlockIconDialog(QDialog):
         self.resize(960, 560)
         ensure_initial_block_2d_seeded()
 
-        self._vault_worker: _VaultRegisterWorker | None = None
+        self._download_worker: _VaultDownloadWorker | None = None
         self._installed: list[InstalledBlockVisual] = load_installed_block_visuals()
         self._hover_ctrl: McmetaStandardTableRowHoverController | None = None
 
@@ -240,14 +257,25 @@ class GameResourceBlockIconDialog(QDialog):
     def _on_download_clicked(self) -> None:
         if self._source.currentData() != BLOCK_SOURCE_VAULT:
             return
-        self._set_busy(True, "正在准备 Vault 目录…")
-        self._vault_worker = _VaultRegisterWorker()
-        self._vault_worker.finished_ok.connect(self._on_vault_ok)
-        self._vault_worker.finished_err.connect(self._on_vault_err)
-        self._vault_worker.start()
+
+        self._progress_dlg = GenericProgressDialog("下载方块图标", self)
+        self._download_worker = _VaultDownloadWorker()
+
+        self._download_worker.progress.connect(self._progress_dlg.set_progress)
+        self._download_worker.progress.connect(
+            lambda _c, _t, status: self._progress_dlg.set_status(status)
+        )
+        self._download_worker.finished_ok.connect(self._on_vault_ok)
+        self._download_worker.finished_err.connect(self._on_vault_err)
+        self._progress_dlg.canceled.connect(self._download_worker.cancel)
+
+        self._download_worker.start()
+        self._progress_dlg.exec()
 
     def _on_vault_ok(self, item: object) -> None:
-        self._vault_worker = None
+        if hasattr(self, "_progress_dlg"):
+            self._progress_dlg.accept()
+        self._download_worker = None
         if not isinstance(item, InstalledBlockVisual):
             self._set_busy(False, "登记失败")
             return
@@ -255,14 +283,16 @@ class GameResourceBlockIconDialog(QDialog):
         self._refresh_table()
         self._set_busy(
             False,
-            "已写入 block_icon/installed.json。站点为动态网页，批量方块图标自动拉取将在后续版本接入。",
+            "已写入 block_icon/installed.json，Vault 图标索引下载完成。",
         )
         restart_material_list_icon_prewarm()
 
     def _on_vault_err(self, err: str) -> None:
-        self._vault_worker = None
+        if hasattr(self, "_progress_dlg"):
+            self._progress_dlg.reject()
+        self._download_worker = None
         self._set_busy(False, "登记失败")
-        QMessageBox.warning(self, "方块图标", f"Vault 登记失败：\n{err}")
+        QMessageBox.warning(self, "方块图标", f"Vault 下载或登记失败：\n{err}")
 
     def _on_apply_material_list(self, item_id: str) -> None:
         if item_id == BLOCK_SOURCE_BUILTIN:
