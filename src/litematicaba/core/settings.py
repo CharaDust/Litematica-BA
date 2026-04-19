@@ -13,14 +13,15 @@ from typing import Any
 
 from litematicaba.core.config import user_data_dir
 
+# 有效主题列表（被注释掉的主题还尚未开发完成）
 VALID_THEMES = (
     "QTDefault",
-    "Glass7",
-    "Metro8",
+    # "Glass7",
+    # "Metro8",
     "Metro10",
-    "Fluent11",
-    "LightMac",
-    "Bootstrap5",
+    # "Fluent11",
+    # "LightMac",
+    # "Bootstrap5",
     "Minecraft",
 )
 DEFAULT_THEME = "QTDefault"
