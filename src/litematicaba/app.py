@@ -8,11 +8,14 @@ from litematicaba.core.config import (
     set_user_accepted_unwritable_data_dir,
     user_data_dir_is_writable,
 )
+# 设置项
 from litematicaba.core.settings import load_settings
+# 主窗口
 from litematicaba.ui.main_window import MainWindow
+# 主题
 from litematicaba.ui.theme import apply_theme
 
-
+# app启动画面
 try:
     import pyi_splash
     pyi_splash.close()
@@ -20,7 +23,10 @@ except ImportError:
     pass
 
 def main() -> int:
+    # 创建应用实例
     app = QApplication(sys.argv)
+
+    # 检查目录可写性
     if getattr(sys, "frozen", False) and not user_data_dir_is_writable():
         r = QMessageBox.question(
             None,
@@ -32,9 +38,14 @@ def main() -> int:
         if r != QMessageBox.StandardButton.Yes:
             return 0
         set_user_accepted_unwritable_data_dir()
+
+    # 加载设置
     settings = load_settings()
     apply_theme(app, settings.theme_id)
 
-    window = MainWindow()
+    # 创建窗口
+    window = MainWindow() # 主窗口
     window.show()
+
+    # 事件循环
     return app.exec()

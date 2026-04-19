@@ -52,6 +52,7 @@ from litematicaba.ui.widget_inspector import WidgetInspectorController
 from litematicaba.ui.widgets.nav_expand import NavExpandButton
 from litematicaba.ui.widgets.nav_item import NavItemButton
 
+# 页面排序
 PAGE_HOME = 0
 PAGE_LIBRARY = 1
 PAGE_PROPERTIES = 2
