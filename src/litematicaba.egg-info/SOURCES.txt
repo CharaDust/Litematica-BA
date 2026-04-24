@@ -14,7 +14,9 @@ src/litematicaba/core/__init__.py
 src/litematicaba/core/config.py
 src/litematicaba/core/content_tile_layout_db.py
 src/litematicaba/core/game_resource_block_icon.py
+src/litematicaba/core/game_resource_item_icon.py
 src/litematicaba/core/game_resource_language.py
+src/litematicaba/core/layering_item_icon_pixmap_cache.py
 src/litematicaba/core/legacy_statistics.py
 src/litematicaba/core/litematic_block_scan.py
 src/litematicaba/core/litematic_ortho_preview.py
@@ -37,7 +39,9 @@ src/litematicaba/resources/web/vendor/deepslate.umd.js
 src/litematicaba/resources/web/vendor/gl-matrix-min.js
 src/litematicaba/ui/__init__.py
 src/litematicaba/ui/game_resource_block_icon_dialog.py
+src/litematicaba/ui/game_resource_item_icon_dialog.py
 src/litematicaba/ui/game_resource_language_dialog.py
+src/litematicaba/ui/layering_item_icon_prewarmer.py
 src/litematicaba/ui/main_window.py
 src/litematicaba/ui/material_list_dialog.py
 src/litematicaba/ui/material_list_icon_prewarmer.py
@@ -91,4 +95,5 @@ src/litematicaba/ui/widgets/__init__.py
 src/litematicaba/ui/widgets/mcmeta_standard_table.py
 src/litematicaba/ui/widgets/nav_expand.py
 src/litematicaba/ui/widgets/nav_item.py
+src/litematicaba/ui/widgets/progress_dialog.py
 src/litematicaba/ui/widgets/themed_plain_table.py

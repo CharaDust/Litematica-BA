@@ -76,7 +76,6 @@ if "!MODE!"=="full" (
     --add-data "%ROOT%\src\litematicaba\ui\resources;litematicaba\ui\resources" ^
     --add-data "%ROOT%\src\litematicaba\resources\web;litematicaba\resources\web" ^
     --add-data "%ROOT%\pack-in;pack-in" ^
-    --add-data "%ROOT%\lang;lang" ^
     --add-data "%ROOT%\logo;logo" ^
     --splash "%ROOT%\logo\logo_full.png" ^
     --noupx ^

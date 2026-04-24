@@ -721,6 +721,22 @@ class PropertiesPage(QWidget):
         if self._current_data.file_path is None:
             QMessageBox.information(self, "保存", "请先选择一个 .litematic 文件。")
             return
+
+        # 检查文件名是否被更改
+        original_file_name = self._current_data.file_name
+        current_ui_file_name = self._file_name_edit.text().strip()
+
+        if current_ui_file_name != original_file_name:
+            QMessageBox.information(
+                self,
+                "保存",
+                f"此改动将依旧保存到\"{original_file_name}\"，文件名更改将不会生效。"
+            )
+            # 将 UI 上的文件名恢复为原始文件名，确保后续 _collect_ui_to_model 拿到的是旧名
+            self._loading = True
+            self._file_name_edit.setText(original_file_name)
+            self._loading = False
+
         try:
             model = self._collect_ui_to_model()
             save_snbt_properties(model)

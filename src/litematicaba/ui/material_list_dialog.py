@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QHeaderView,
     QSizePolicy,
     QSpinBox,
     QTableWidget,
@@ -87,26 +88,19 @@ def _material_list_icon_cell_widget(pm: QPixmap) -> QWidget:
     return wrap
 
 
-def _sync_material_list_name_column_width(table: QTableWidget) -> None:
-    """名称列宽度：表头与各行显示名中最长一行的像素宽度 + 边距。"""
-    hi = table.horizontalHeaderItem(1)
-    header_text = hi.text() if hi is not None else "名称"
-    max_w = QFontMetrics(table.horizontalHeader().font()).horizontalAdvance(header_text)
-    fm = QFontMetrics(table.font())
-    for r in range(table.rowCount()):
-        it = table.item(r, 1)
-        if it is not None:
-            max_w = max(max_w, fm.horizontalAdvance(it.text()))
-    table.setColumnWidth(1, max(_NAME_COL_MIN_W, max_w + _NAME_COL_PAD_H))
-
-
 def _load_block_cn_map() -> dict[str, str]:
     return load_runtime_language_map()
 
 
 def _display_name(block_id: str, cn: dict[str, str]) -> str:
     if block_id.startswith("E/"):
-        return block_id
+        # 实体翻译：E/minecraft:pig -> entity.minecraft.pig
+        raw_entity = block_id[2:]
+        return (
+            cn.get(f"entity.{raw_entity.replace(':', '.')}")
+            or cn.get(f"entity.{raw_entity}")
+            or block_id
+        )
     raw = block_id.split("[")[0].strip()
     if ":" in raw:
         local = raw.split(":", 1)[1]
@@ -322,7 +316,9 @@ class MaterialListDialog(QDialog):
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setColumnWidth(0, 40)
-        self._table.horizontalHeader().setStretchLastSection(True)
+        self._table.setColumnWidth(2, 100)
+        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         configure_material_list_table(self._table, self._theme_id)
 
         root = QVBoxLayout(self)
@@ -653,8 +649,6 @@ class MaterialListDialog(QDialog):
                 total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 total_item.setForeground(brush)
                 self._table.setItem(i, 2, total_item)
-            _sync_material_list_name_column_width(self._table)
-            sync_material_list_row_heights(self._table, self._theme_id)
             refresh_material_list_row_visuals(self._table)
             return
 

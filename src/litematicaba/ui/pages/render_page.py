@@ -198,11 +198,37 @@ class RenderCapturePreviewDialog(QDialog):
             QMessageBox.warning(self, "预览图", "没有可写入的图像。")
             return
         self._apply_preview(self._full_image)
-        QMessageBox.information(
-            self,
-            "预览图",
-            "已写入属性页预览（内存）。请到「属性」页确认并保存文件以写入 PreviewImageData。",
-        )
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("预览图")
+        msg.setText("已写入属性页预览（内存）。请到「属性」页确认并保存文件以写入 PreviewImageData。")
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+        btn_goto = msg.addButton("跳转到“属性”", QMessageBox.ButtonRole.ActionRole)
+        msg.exec()
+
+        if msg.clickedButton() == btn_goto:
+            # 查找主窗口并跳转
+            from litematicaba.ui.main_window import MainWindow
+            top = self.window()
+            # 这里的 self 是 RenderCapturePreviewDialog，其 parent 是 RenderPage
+            # RenderPage 的 window() 才是 MainWindow
+            if top is not None and not isinstance(top, MainWindow):
+                # 尝试通过 parent 链找 MainWindow
+                curr = self.parentWidget()
+                while curr is not None:
+                    if isinstance(curr, MainWindow):
+                        top = curr
+                        break
+                    curr = curr.parentWidget()
+
+            if isinstance(top, MainWindow):
+                top._on_nav_properties()
+            self.accept()
+
+    def _on_goto_properties(self) -> None:
+        # 该方法已不再被按钮直接连接，但保留或删除均可，此处选择删除
+        pass
 
 
 def _effective_camera_fov_for_slider(raw: int) -> int:
@@ -743,6 +769,12 @@ class RenderPage(QWidget):
     def _on_active_file_changed(self, _path: str) -> None:
         self._sync_path_label()
         self._sync_region_combo()
+        if self._use_nbt_viewer and self._view is not None:
+            # 切换文件时强制重新加载 HTML 以清空上一个文件的 JS 状态
+            self._viewer_ready = False
+            p, _ = resolve_nbt_viewer_html_path(self._nbt_applied_mcmeta_version)
+            if p and p.is_file():
+                self._view.load(QUrl.fromLocalFile(str(p.resolve())))
         self._schedule_load()
 
     def _on_region_changed(self, _index: int) -> None:

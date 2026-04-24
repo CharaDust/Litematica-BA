@@ -13,14 +13,15 @@ from typing import Any
 
 from litematicaba.core.config import user_data_dir
 
+# 有效主题列表（被注释掉的主题还尚未开发完成）
 VALID_THEMES = (
     "QTDefault",
-    "Glass7",
-    "Metro8",
+    # "Glass7",
+    # "Metro8",
     "Metro10",
-    "Fluent11",
-    "LightMac",
-    "Bootstrap5",
+    # "Fluent11",
+    # "LightMac",
+    # "Bootstrap5",
     "Minecraft",
 )
 DEFAULT_THEME = "QTDefault"
@@ -74,11 +75,20 @@ DEFAULT_LITEMATIC_ASYNC_LOAD_MIN_BYTES = 128 * 1024
 
 @dataclass
 class AppSettings:
+    # 界面：
+    ## 主题名称
     theme_id: str = DEFAULT_THEME
-    show_ui_test_nav: bool = True
+    ## 显示磁贴网格
     show_tile_grid: bool = False
+    ## 自动放置磁贴优先列数
     tile_auto_place_preferred_cols: int = 12
+    ## 磁贴视图右侧留白
     tile_view_right_padding_px: int = 64
+
+    # 调试：
+    ## 显示UI测试入口（即将弃用；未来移动至“侧栏功能编辑”）
+    show_ui_test_nav: bool = True
+    ## 显示控件信息
     show_widget_inspector: bool = False
     perf_test_overlay: bool = False
     # Deepslate / WebView 渲染包：默认不在启动时联网检查；见 design §2.0.4、§2.6.3.9
@@ -185,7 +195,7 @@ class AppSettings:
 def _settings_path() -> Path:
     return user_data_dir() / "settings.json"
 
-
+# 加载设置
 def load_settings() -> AppSettings:
     path = _settings_path()
     if not path.is_file():
