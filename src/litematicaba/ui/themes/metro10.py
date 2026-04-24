@@ -3,40 +3,79 @@ from __future__ import annotations
 from litematicaba.ui.themes.base import ThemeDef, qss_url, resource_dir
 from litematicaba.ui.themes.sidebar_nav_win10 import NAV_SIDEBAR_WIN10_QSS
 
+# 按钮
+_BTN_HEIGHT_OUTER = 31 # 按钮高度
+_BTN_BRD_WIDTH = 2 # 按钮边框宽度
+_BTN_PAD_VER = 0 # 按钮垂直内边距
+_BTN_PAD_HOR = 12 # 按钮水平内边距
 
 def build_qss() -> str:
-    d = resource_dir("metro10")
-    radio10_default = qss_url(d / "radio_default.svg")
-    radio10_hover = qss_url(d / "radio_hover.svg")
-    radio10_checked = qss_url(d / "radio_checked.svg")
-    radio10_checked_hover = qss_url(d / "radio_checked_hover.svg")
-    checkbox10_default = qss_url(d / "checkbox_default.svg")
-    checkbox10_hover = qss_url(d / "checkbox_hover.svg")
-    checkbox10_checked = qss_url(d / "checkbox_checked.svg")
-    checkbox10_checked_hover = qss_url(d / "checkbox_checked_hover.svg")
-    slider10_handle = qss_url(d / "slider_handle.svg")
-    arrow10_up = qss_url(d / "arrow_up.svg")
-    arrow10_down = qss_url(d / "arrow_down.svg")
-    arrow10_left = qss_url(d / "arrow_left.svg")
-    arrow10_right = qss_url(d / "arrow_right.svg")
-    spin10_plus = qss_url(d / "spin_plus.svg")
-    spin10_minus = qss_url(d / "spin_minus.svg")
+    # 资源路径
+    UI_M10_dir = resource_dir("metro10")
+    # 单选框
+    radio_M10_default = qss_url(UI_M10_dir / "radio_default.svg")
+    radio_M10_hover = qss_url(UI_M10_dir / "radio_hover.svg")
+    radio_M10_checked = qss_url(UI_M10_dir / "radio_checked.svg")
+    radio_M10_checked_hover = qss_url(UI_M10_dir / "radio_checked_hover.svg")
+    # 复选框
+    checkbox_M10_default = qss_url(UI_M10_dir / "checkbox_default.svg")
+    checkbox_M10_hover = qss_url(UI_M10_dir / "checkbox_hover.svg")
+    checkbox_M10_checked = qss_url(UI_M10_dir / "checkbox_checked.svg")
+    checkbox_M10_checked_hover = qss_url(UI_M10_dir / "checkbox_checked_hover.svg")
+    # 滑块
+    slider_M10_handle = qss_url(UI_M10_dir / "slider_handle.svg")
+    # 箭头
+    arrow_M10_up = qss_url(UI_M10_dir / "arrow_up.svg")
+    arrowv_M10_down = qss_url(UI_M10_dir / "arrow_down.svg")
+    arrow_M10_left = qss_url(UI_M10_dir / "arrow_left.svg")
+    arrow_M10_right = qss_url(UI_M10_dir / "arrow_right.svg")
+    spin_M10_plus = qss_url(UI_M10_dir / "spin_plus.svg")
+    spin_M10_minus = qss_url(UI_M10_dir / "spin_minus.svg")
+    # 颜色
+    color_background_M10_window = "#ffffff" # 主界面背景
+    color_text_M10 = "#1a1a1a" # 主界面文字
 
     return (
         NAV_SIDEBAR_WIN10_QSS
         + """
-    QWidget { background-color: #ffffff; color: #1a1a1a; font-size: 10pt; }
-    QMainWindow > QWidget { background-color: #ffffff; }
-    QScrollArea { border: none; background-color: transparent; }
+    /* 主界面基础样式 */
+    QWidget { 
+        background-color: {color_background_M10_window}; 
+        color: {color_text_M10}; 
+        font-size: 10pt; 
+    }
+    /* 纯文字控件 */
+    QLabel,
+    /* 复选框 */
+    QCheckBox,
+    /* 单选框 */
+    QRadioButton {
+        background-color: transparent;
+    }
+    /* 主窗口 */
+    QMainWindow { background-color: {color_background_M10_window}; }
+    /* 滚动区域 */
+    QScrollArea { 
+        border: none; 
+        background-color: transparent; 
+    }
+    /* 分组框 */
     QGroupBox {
-        font-weight: bold;
+        font-weight: regular;
+        font-size: 18pt;
         border: 1px solid #c8c8c8;
-        border-radius: 0px;
+        border-radius: 0;
         margin-top: 10px;
-        padding-top: 8px;
+        padding-top: 18px;
         background-color: #fafafa;
     }
-    QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+    /* 分组框标题 */
+    QGroupBox::title { 
+        font-size: 18pt;
+        subcontrol-origin: margin; 
+        left: 10px; 
+        padding: 0 4px; 
+    }
 
     /* 列表默认行高约定：60px；QComboBox 下拉项：32px */
     QListWidget::item,
@@ -48,7 +87,10 @@ def build_qss() -> str:
         min-height: 32px;
     }
 
-    QPushButton, QToolButton {
+    /* 按钮 */
+    QPushButton, 
+    /* 工具按钮 */
+    QToolButton {
         background-color: #cccccc;
         border: 2px solid transparent;
         border-radius: 0px;
@@ -56,17 +98,22 @@ def build_qss() -> str:
         min-height: 27px;
         max-height: 27px;
     }
+    /* ：悬停态 */
     QPushButton:hover:enabled, QToolButton:hover:enabled {
         border-color: #7a7a7a;
     }
+    /* ：按下态 */
     QPushButton:pressed, QToolButton:pressed { background-color: #999999; }
+    /* ：选中态 */
     QPushButton:checked, QToolButton:checked {
         background-color: #999999;
     }
+    /* ：禁用态 */
     QPushButton:disabled, QToolButton:disabled {
         color: #7a7a7a;
     }
 
+    /* 输入框 */
     QLineEdit, QComboBox {
         border: 2px solid #999999;
         border-radius: 0px;
@@ -205,21 +252,21 @@ def build_qss() -> str:
     QScrollBar::right-arrow:horizontal { image: url("%s"); width: 16px; height: 16px; }
     """
         % (
-            spin10_plus,
-            spin10_minus,
-            radio10_default,
-            radio10_hover,
-            radio10_checked,
-            radio10_checked_hover,
-            checkbox10_default,
-            checkbox10_hover,
-            checkbox10_checked,
-            checkbox10_checked_hover,
-            slider10_handle,
-            arrow10_up,
-            arrow10_down,
-            arrow10_left,
-            arrow10_right,
+            spin_M10_plus,
+            spin_M10_minus,
+            radio_M10_default,
+            radio_M10_hover,
+            radio_M10_checked,
+            radio_M10_checked_hover,
+            checkbox_M10_default,
+            checkbox_M10_hover,
+            checkbox_M10_checked,
+            checkbox_M10_checked_hover,
+            slider_M10_handle,
+            arrow_M10_up,
+            arrowv_M10_down,
+            arrow_M10_left,
+            arrow_M10_right,
         )
     )
 
